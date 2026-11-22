@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velvet Worlds: collect elements, open worlds | AI Study Method</title>
+<meta name="description" content="Collect the 118 elements with Velvet Coins from revision at AI Study Method. Each element opens a world to explore. Find protons, neutrons and electrons, build atoms and bond them into compound weapons.">
+<!-- velvetworlds.com: the game's own domain (22 Nov 2026). The files under /velvet-worlds/, /classcraft/ and /fonts/ are copies
+     from the AI Study Method site folder, made by tools/sync-from-site.sh. This page belongs to this folder. -->
+<link rel="canonical" href="https://velvetworlds.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link href="/fonts/lesson-fonts.css?v=20261116" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="/velvet-worlds/app.css?v=20261119c" rel="stylesheet">
+<!-- Privacy-friendly analytics by Plausible -->
+<script async src="https://plausible.io/js/pa-y_3K19wHddzHShFk02JEm.js"></script>
+<script>
+  window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+  plausible.init()
+</script>
+</head>
+<body>
+<div id="vw-app"></div>
+<noscript><p style="color:#e9e9ff;text-align:center;padding:40px">Velvet Worlds needs JavaScript. <a href="https://aistudymethod.com/" style="color:#00f0ff">AI Study Method</a></p></noscript>
+<script>
+/* Settings for the shared scripts, then the sign-in handoff, then the scripts themselves.
+   A student who was signed in on aistudymethod.com arrives with "#ho=<code>" on the address. The code works once and for
+   60 seconds. It is swapped at the accounts server for this domain's own sign-in before the page's scripts start, so the
+   page opens signed in. The code is taken off the address at once. If the swap fails the page opens signed out. */
+window.AISM_NO_SIGNUP_PROMPT = true; window.VW_MODE = "full"; window.AISM_SITE = "https://aistudymethod.com";
+(function () {
+  var API = String(window.AISM_ACCOUNTS_URL || "https://aism-accounts-7aktx.bunny.run").replace(/\/+$/, "");
+  var V = "20261122a";
+  var SCRIPTS = ["/classcraft/arcade/elements-data.js", "/classcraft/arcade/auth.js?v=" + V, "/classcraft/quizzes/share-score.js", "/velvet-worlds/app.js?v=" + V];
+  function start() {
+    var i = 0;
+    (function next() {
+      if (i >= SCRIPTS.length) return;
+      var s = document.createElement("script"); s.src = SCRIPTS[i++]; s.onload = next; s.onerror = next; document.body.appendChild(s);
+    })();
+  }
+  var m = /[#&]ho=([^&]+)/.exec(location.hash || "");
+  if (!m) { start(); return; }
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  var code = ""; try { code = decodeURIComponent(m[1]); } catch (e) {}
+  var started = false; function once() { if (!started) { started = true; start(); } }
+  setTimeout(once, 6000);                                      // a slow server must not leave a blank page
+  fetch(API + "/handoff-claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: code }) })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (d && d.token && d.userId && !started) {
+        try { localStorage.setItem("aism-auth", JSON.stringify({ token: d.token, userId: d.userId, username: d.username })); } catch (e) {}
+        try { if (d.wallet) localStorage.setItem("aism-wallet", JSON.stringify({ uid: d.userId, w: d.wallet })); else localStorage.removeItem("aism-wallet"); } catch (e) {}
+        try { if (typeof window.plausible === "function") window.plausible("Velvet Worlds: arrived signed in"); } catch (e) {}
+      }
+    })
+    .catch(function () {})
+    .then(once);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1365 @@
+/* Velvet Arcade — accounts front end (client + corner UI + auth modal).
+   Talks to the aism-accounts Bunny Edge Script. Self-contained: injects its
+   own CSS, matches the arcade's retro theme. Load AFTER wallet.js if present.
+
+   Public API (Arcade.auth):
+     isLoggedIn(), user(), userId(), token(), wallet()
+     register(username,password,refCode?) -> {ok, recoveryKey, referral} | {ok:false, error}
+     referral()                   -> {ok, code, joined, rewarded, pending, mine, ...}  (authed)
+     openInvite()                 "Invite a friend" modal (friend code + share link)
+     feedbackStatus()             -> {ok, claimed, eligible, coins}   (authed)
+     openFeedback({where})        the feedback quest: 3 questions, sent to Formspree, then
+                                  +100 coins once per account (server /feedback)
+     openReport({page,screen,heading})  "Report a mistake" on a lesson screen, sent to
+                                  Formspree with a ref; Billy pays 20 coins if confirmed
+     login(username,password)     -> {ok} | {ok:false, error}
+     recover(username,key,newPw)  -> {ok, recoveryKey} | {ok:false, error}
+     logout()
+     award(pct), buy(series,item), pull()   (used by wallet.js; authed)
+     onChange(fn) -> unsubscribe
+     mountCorner(target?)          top-corner auth/balance widget
+     open(mode, {source})          open the auth modal ('login'|'register'|'recover');
+                                   source ('corner'|'end card'|'prompt') is reported
+                                   with the Plausible "Arcade signup: registered" event
+
+   Also installs the once-per-device sign-up prompt after a logged-out
+   player's first end card (see "first-game sign-up prompt" below).
+
+   Friend codes (Oct 2026): a ?ref=CODE on any page carrying this file is
+   remembered for 30 days and pre-fills the code at sign-up. The ids of
+   accounts this browser has been logged in as stay in localStorage
+   (aism-uids) and are sent ONLY with /register, so a player can't use their
+   own code on their own device. The server decides everything else.
+
+   Config: window.AISM_ACCOUNTS_URL overrides the endpoint;
+   window.AISM_NO_CORNER hides the corner widget; window.AISM_NO_SIGNUP_PROMPT
+   disables the sign-up prompt (demo/test pages). Emits window event
+   'aism-auth-change' {loggedIn, user, wallet} on any state change.
+   Analytics: fires Plausible custom events when window.plausible exists
+   (Arcade signup prompt: shown / create account / not now; Arcade signup:
+   registered {source}). Nothing is sent if Plausible isn't on the page.
+   Nov 2026, to see where sign-ups are lost: "Signup form: shown" {source}
+   (the REGISTER tab is showing), "Signup form: error" {source, error}
+   (error = server code, or "password-client" for the local password check),
+   "Signup form: closed" {source, step} (closed without logging in or
+   confirming the recovery key; step = register | login | recover | recovery),
+   "Signup: key confirmed" {source} ("Start playing" on the recovery-key screen). */
+(function () {
+  "use strict";
+  if (typeof window === "undefined") return;
+  var Arcade = (window.Arcade = window.Arcade || {});
+  if (Arcade.auth) return;
+
+  var API = String(window.AISM_ACCOUNTS_URL || "https://aism-accounts-7aktx.bunny.run").replace(/\/+$/, "");
+  var LS = "aism-auth"; // { token, userId, username }
+  /* The game has its own domain, velvetworlds.com (22 Nov 2026). Its page loads this same file and sets
+     window.AISM_SITE = "https://aistudymethod.com", so that links back to the site are whole addresses.
+     On aistudymethod.com AISM_SITE is not set and SITE is "". */
+  var SITE = String(window.AISM_SITE || "").replace(/\/+$/, "");
+  var WLS = "aism-wallet"; // { uid, w: <wallet snapshot> } — instant-paint cache
+  // Directory of THIS file (…/classcraft/arcade/), so avatar art + the avatar
+  // dataset resolve correctly whether we're on the lobby, a game page or the
+  // collection page. Defensive for the no-DOM test environment.
+  var AUTH_BASE = (function () {
+    try {
+      var s = (document.currentScript && document.currentScript.src) || "";
+      if (!s && document.getElementsByTagName) {
+        var ss = document.getElementsByTagName("script");
+        for (var i = ss.length - 1; i >= 0; i--) { if (ss[i].src && /arcade\/auth\.js(\?|#|$)/.test(ss[i].src)) { s = ss[i].src; break; } }
+      }
+      return s ? s.replace(/auth\.js([?#].*)?$/, "") : "";
+    } catch (e) { return ""; }
+  })();
+
+  var state = load();      // logged-in session or null
+
+  /* ---------------- friend codes: local bits ---------------- */
+  var REF_LS = "aism-ref";       // { code, at } from a ?ref= link
+  var UIDS_LS = "aism-uids";     // account ids this browser has held (sent only at /register)
+  var SHARE_URL = "https://aistudymethod.com/classcraft/arcade.html";
+  function cleanRef(v) { var c = String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); return /^[A-HJ-NP-Z2-9]{6}$/.test(c) ? c : ""; }
+  (function captureRef() {
+    try {
+      var m = /[?&]ref=([^&#]+)/i.exec(location.search || "");
+      var c = m ? cleanRef(decodeURIComponent(m[1])) : "";
+      if (c) localStorage.setItem(REF_LS, JSON.stringify({ code: c, at: Date.now() }));
+    } catch (e) {}
+  })();
+  function storedRef() {
+    try {
+      var r = JSON.parse(localStorage.getItem(REF_LS) || "null");
+      if (r && r.code && Date.now() - r.at < 30 * 86400000) return cleanRef(r.code);
+    } catch (e) {}
+    return "";
+  }
+  function clearRef() { try { localStorage.removeItem(REF_LS); } catch (e) {} }
+  function priorUids() { try { var a = JSON.parse(localStorage.getItem(UIDS_LS) || "[]"); return Array.isArray(a) ? a.slice(-20) : []; } catch (e) { return []; } }
+  function rememberUid(id) {
+    if (!id) return;
+    try { var a = priorUids().filter(function (x) { return x !== id; }); a.push(id); localStorage.setItem(UIDS_LS, JSON.stringify(a.slice(-20))); } catch (e) {}
+  }
+
+  function load() { try { return JSON.parse(localStorage.getItem(LS) || "null"); } catch (e) { return null; } }
+  function save() { try { state ? localStorage.setItem(LS, JSON.stringify(state)) : localStorage.removeItem(LS); } catch (e) {} }
+  /* Wallet snapshot cache (2026-08-26): the snapshot used to live only in
+     memory, so every page waited on GET /pull — a slow round-trip when the
+     edge script is cold — before coins/collection could paint, and the
+     element shop opened showing zeros. The last known snapshot is now
+     cached per user and painted instantly; pull() still runs at boot and
+     reconciles, so the server stays the source of truth for the balance.
+     Cleared on logout and 401. */
+  function loadWallet() {
+    try {
+      if (!state || !state.token) return null;
+      var c = JSON.parse(localStorage.getItem(WLS) || "null");
+      return (c && c.uid === state.userId) ? c.w : null;
+    } catch (e) { return null; }
+  }
+  function saveWallet() {
+    try {
+      if (state && walletSnap) localStorage.setItem(WLS, JSON.stringify({ uid: state.userId, w: walletSnap }));
+      else localStorage.removeItem(WLS);
+    } catch (e) {}
+  }
+  var walletSnap = loadWallet();   // cached snapshot for instant paint; pull() refreshes it
+
+  function emit() {
+    saveWallet();   // emit() follows every session/wallet change — one choke point
+    try { window.dispatchEvent(new CustomEvent("aism-auth-change", { detail: { loggedIn: !!state, user: state && state.username, wallet: walletSnap } })); } catch (e) {}
+  }
+
+  /* ---------------- network ---------------- */
+  async function api(path, opts) {
+    opts = opts || {};
+    var headers = {};
+    if (opts.body) headers["content-type"] = "application/json";
+    if (opts.auth && state && state.token) headers["authorization"] = "Bearer " + state.token;
+    var res;
+    try {
+      res = await fetch(API + path, { method: opts.method || "POST", headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    } catch (e) { return { ok: false, status: 0, error: "network" }; }
+    var data = null; try { data = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      // An authed call returning 401 means the token is invalid/expired -> drop it.
+      if (opts.auth && res.status === 401) { state = null; walletSnap = null; save(); emit(); }
+      return { ok: false, status: res.status, error: (data && data.error) || ("http-" + res.status), data: data };
+    }
+    return { ok: true, status: res.status, data: data || {} };
+  }
+  function setSession(d) { state = { token: d.token, userId: d.userId, username: d.username }; walletSnap = d.wallet || null; rememberUid(d.userId); save(); emit(); }
+  if (state && state.userId) rememberUid(state.userId);   // sessions from before friend codes
+
+  /* ---------------- client API ---------------- */
+  var auth = {
+    API: API,
+    isLoggedIn: function () { return !!(state && state.token); },
+    user: function () { return state ? state.username : null; },
+    userId: function () { return state ? state.userId : null; },
+    token: function () { return state ? state.token : null; },
+    wallet: function () { return walletSnap; },
+
+    register: async function (username, password, refCode) {
+      var body = { username: username, password: password };
+      if (refCode) { body.refCode = refCode; body.priorUids = priorUids(); }
+      var r = await api("/register", { body: body });
+      if (r.ok) { if (refCode) clearRef(); setSession(r.data); bankPendingRun(); return { ok: true, recoveryKey: r.data.recoveryKey, wallet: r.data.wallet, referral: r.data.referral || null }; }
+      return { ok: false, error: r.error, status: r.status };
+    },
+    referral: async function () {
+      var r = await api("/referral", { method: "GET", auth: true });
+      return r.ok ? Object.assign({ ok: true }, r.data) : { ok: false, error: r.error };
+    },
+    login: async function (username, password) {
+      var r = await api("/login", { body: { username: username, password: password } });
+      if (r.ok) { setSession(r.data); bankPendingRun(); return { ok: true, wallet: r.data.wallet }; }
+      return { ok: false, error: r.error, status: r.status };
+    },
+    recover: async function (username, recoveryKey, newPassword) {
+      var r = await api("/recover", { body: { username: username, recoveryKey: recoveryKey, newPassword: newPassword } });
+      if (r.ok) { setSession(r.data); return { ok: true, recoveryKey: r.data.recoveryKey }; }
+      return { ok: false, error: r.error, status: r.status };
+    },
+    logout: function () { state = null; walletSnap = null; save(); emit(); },
+
+    pull: async function () { var r = await api("/pull", { method: "GET", auth: true }); if (r.ok) { walletSnap = r.data.wallet; emit(); } return r; },
+    award: async function (pct) { var r = await api("/award", { body: { pct: pct }, auth: true }); if (r.ok) { walletSnap = r.data.wallet; emit(); return Object.assign({ ok: true }, r.data); } return { ok: false, error: r.error, status: r.status }; },
+    // Seasonal treat (e.g. "halloween-2026"): the server pays it at most once per account.
+    treat: async function (campaign) { var r = await api("/treat", { body: { campaign: campaign }, auth: true }); if (r.ok) { walletSnap = r.data.wallet; emit(); return Object.assign({ ok: true }, r.data); } return { ok: false, error: r.error, status: r.status }; },
+    buy: async function (series, item) { var r = await api("/buy", { body: { series: series, item: item }, auth: true }); if (r.ok) { walletSnap = r.data.wallet; emit(); return Object.assign({ ok: true }, r.data); } return { ok: false, error: r.error, status: r.status }; },
+
+    onChange: function (fn) { var h = function (e) { fn(e && e.detail); }; window.addEventListener("aism-auth-change", h); return function () { window.removeEventListener("aism-auth-change", h); }; },
+
+    // exposed for the UI + tests
+    _genUsername: genUsername,
+    _passwordError: passwordError,
+    _errText: errText,
+    _storedRef: storedRef,
+    _clearRef: clearRef,
+  };
+
+  /* ---------------- helpers: username + password ---------------- */
+  var ADJ = ["nova", "swift", "brave", "clever", "sunny", "lunar", "cosmic", "turbo", "mighty", "zippy", "stellar", "pixel", "neon", "vivid", "witty", "jazzy", "rapid", "bold", "keen", "snappy", "amber", "misty"];
+  var ANIMALS = ["otter", "falcon", "tiger", "panda", "koala", "lynx", "heron", "bison", "gecko", "raven", "moose", "shark", "wombat", "ferret", "badger", "marten", "osprey", "narwhal", "ibex", "tapir", "quokka", "puffin"];
+  function rand(n) { return Math.floor(Math.random() * n); }
+  function genUsername() { return ADJ[rand(ADJ.length)] + "-" + ANIMALS[rand(ANIMALS.length)] + "-" + (1000 + rand(9000)); }
+  var COMMON = ["password", "password1", "password123", "12345678", "123456789", "qwerty", "qwerty123", "111111", "abc123", "iloveyou", "letmein", "welcome", "monkey", "dragon", "football", "sunshine", "passw0rd", "trustno1", "zxcvbnm", "changeme"];
+  function passwordError(p) {
+    if (typeof p !== "string" || p.length < 8) return "Use at least 8 characters.";
+    if (p.length > 200) return "That's too long.";
+    if (COMMON.indexOf(p.toLowerCase()) > -1) return "That password is too common — pick something harder to guess.";
+    return null;
+  }
+  /* Plausible custom event, if the page carries the Plausible snippet (it
+     defines window.plausible as a queue before the script loads). Props are
+     optional. Never throws — analytics must never break the arcade. */
+  function track(name, props) {
+    try {
+      if (typeof window.plausible !== "function") return;
+      window.plausible(name, props ? { props: props } : undefined);
+    } catch (e) {}
+  }
+  var openSource = null; // where the auth modal was opened from — see auth.open
+
+  // friendly text for server error codes
+  function errText(code) {
+    return ({
+      "username-invalid": "Username needs 3–20 letters, numbers or hyphens.",
+      "username-taken": "That username's taken — try another.",
+      "password-too-short": "Use at least 8 characters.",
+      "password-too-common": "That password is too common — pick something harder to guess.",
+      "password-too-long": "That password's too long.",
+      "bad-credentials": "Username or password not recognised.",
+      "too-many-attempts": "Too many wrong tries on this account. Wait 15 minutes, then try again.",
+      "password-required": "Enter a password.",
+      "network": "Couldn't reach the server — check your connection.",
+      "ref-code-invalid": "That friend code isn't right — check it, or leave it blank.",
+      "ref-code-own": "That's your own code — share it with a friend instead.",
+      "ref-code-used-up": "That code has already earned all its bonuses. Leave it blank to carry on.",
+      "ref-code-busy": "That code has had lots of sign-ups today — try it tomorrow, or leave it blank.",
+    })[code] || ("Something went wrong (" + code + ").");
+  }
+
+  /* ---------------- UI: styles ---------------- */
+  function injectCss() {
+    if (document.getElementById("aism-auth-css")) return;
+    var s = document.createElement("style");
+    s.id = "aism-auth-css";
+    s.textContent = [
+      ":root{--aism-px:'Press Start 2P',monospace;--aism-vt:'VT323',monospace}",
+      /* corner widget */
+      "#aism-auth-corner{position:fixed;top:16px;right:16px;z-index:99998;font-family:var(--aism-px);touch-action:none}",
+      "#aism-auth-corner.dragging,#aism-auth-corner.dragging *{cursor:grabbing !important}",
+      /* chip docked in the arcade HUD rail: same look, compact, in the layout */
+      "#aism-auth-corner.in-rail{position:relative;top:auto;right:auto;left:auto;bottom:auto;z-index:2;touch-action:auto;flex:none;order:5}",
+      "#aism-auth-corner.in-rail .aism-corner-in{gap:7px;padding:2px 11px 2px 2px;height:34px;box-sizing:border-box;box-shadow:none}",
+      "#aism-auth-corner.in-rail .aism-av-mini{width:28px;height:28px;border-width:1.5px}",
+      "#aism-auth-corner.in-rail .aism-av-mini.empty{font-size:18px}",
+      "#aism-auth-corner.in-rail .aism-coin svg{width:16px;height:16px}",
+      "#aism-auth-corner.in-rail .bal{font-size:11px}",
+      "#aism-auth-corner.in-rail .aism-corner-login{height:34px;box-sizing:border-box;padding:0 12px;gap:7px;font-size:9px;box-shadow:none;white-space:nowrap}",
+      "#aism-auth-corner.in-rail .aism-corner-login svg{width:15px;height:15px}",
+      "#aism-auth-corner.in-rail .aism-menu{z-index:200}",
+      ".aism-btn{cursor:pointer;border:0;border-radius:999px;font-family:var(--aism-px);font-size:10px;letter-spacing:.5px}",
+      ".aism-corner-login{display:flex;align-items:center;gap:9px;background:#1b1636;border:1px solid #f5c542;color:#f5c542;padding:11px 18px;box-shadow:0 6px 20px #0009}",
+      ".aism-corner-in{display:flex;align-items:center;gap:11px;background:#1b1636;border:1px solid #3a3568;border-radius:999px;padding:5px 18px 5px 5px;box-shadow:0 6px 20px #0009;cursor:pointer;transition:border-color .15s}",
+      ".aism-corner-in:hover{border-color:#5ee4e0}",
+      ".aism-corner-in .bal{color:#f5c542;font-size:14px}",
+      /* velvet pixel coin — corner (static, gentle glint; not rotating) */
+      ".aism-coin{position:relative;flex:none;display:inline-block;line-height:0}",
+      ".aism-coin>svg{display:block}",
+      ".aism-coin::after{content:'';position:absolute;top:-1px;right:0;width:5px;height:5px;background:radial-gradient(circle,#fff 0,#fff 30%,transparent 60%);border-radius:50%;opacity:0;animation:aism-glint 3.6s ease-in-out infinite;pointer-events:none}",
+      "@keyframes aism-glint{0%,58%{opacity:0;transform:scale(.4)}68%{opacity:.95;transform:scale(1)}82%,100%{opacity:0;transform:scale(.5)}}",
+      "@media (prefers-reduced-motion:reduce){.aism-coin::after{animation:none;opacity:.5}}",
+      /* end-card win note — reward moment, rotating coin (distinct from the calm corner) */
+      ".aism-win{display:flex;align-items:center;justify-content:center;gap:10px;margin:2px 0 14px;font-family:var(--aism-px);font-size:13px;color:#f5c542;line-height:1.4}",
+      ".aism-win b{color:#fff}",
+      ".aism-win-cap{font-family:var(--aism-vt);font-size:14px;color:#8f88b8}",
+      ".aism-coin-win{display:inline-block;flex:none;animation:aism-spin 1.1s linear infinite}",
+      "@keyframes aism-spin{from{transform:rotateY(0)}to{transform:rotateY(360deg)}}",
+      /* end-card cap notice — feedback when a game earns nothing because today's cap is hit */
+      ".aism-cap{display:flex;align-items:center;justify-content:center;gap:9px;margin:2px 0 14px;font-family:var(--aism-vt);font-size:17px;color:#8f88b8;line-height:1.35;text-align:left}",
+      ".aism-cap b{color:#c6a8ff;font-family:var(--aism-px);font-size:11px}",
+      ".aism-coin-cap{display:inline-block;flex:none;opacity:.8;animation:aism-spin 1.8s linear infinite}",
+      "@media (prefers-reduced-motion:reduce){.aism-coin-win,.aism-coin-cap{animation:none}}",
+      /* dropdown */
+      ".aism-menu{position:absolute;background:#1b1636;border:1px solid #332a5e;border-radius:12px;padding:10px;min-width:200px;box-shadow:0 8px 28px #000a}",
+      ".aism-menu .row{font-family:var(--aism-vt);font-size:18px;color:#e8e4ff;padding:6px 8px}",
+      ".aism-menu .row b{color:#f5c542}",
+      ".aism-menu button{width:100%;margin-top:8px}",
+      /* modal */
+      ".aism-ov{position:fixed;inset:0;z-index:99999;background:#0b0920cc;display:flex;align-items:center;justify-content:center;padding:18px}",
+      ".aism-modal{width:100%;max-width:420px;background:#1b1636;border:2px solid #5ee4e0;border-radius:16px;box-shadow:0 0 30px -8px #5ee4e0,0 18px 50px #000b;overflow:hidden;font-family:var(--aism-vt);color:#e8e4ff}",
+      ".aism-modal h2{font-family:var(--aism-px);font-size:14px;color:#f5c542;text-shadow:2px 2px 0 #6b4e00;padding:18px 18px 4px}",
+      ".aism-tabs{display:flex;gap:6px;padding:8px 18px 0}",
+      ".aism-tab{flex:1;background:#131028;border:1px solid #332a5e;color:#8f88b8;border-radius:8px 8px 0 0;padding:9px;font-family:var(--aism-px);font-size:8px;cursor:pointer}",
+      ".aism-tab.on{color:#131028;background:#5ee4e0;border-color:#5ee4e0}",
+      ".aism-body{padding:16px 18px 20px}",
+      ".aism-field{margin:0 0 13px}",
+      ".aism-field label{display:block;font-family:var(--aism-px);font-size:8px;color:#8f88b8;letter-spacing:.5px;margin-bottom:6px}",
+      ".aism-inrow{display:flex;gap:6px}",
+      ".aism-input{box-sizing:border-box;width:100%;background:#131028;border:1px solid #332a5e;border-radius:8px;color:#e8e4ff;font-family:var(--aism-vt);font-size:20px;padding:10px 12px}",
+      ".aism-input:focus{outline:2px solid #5ee4e0;outline-offset:1px}",
+      ".aism-reroll{flex:none;background:#221b44;border:1px solid #332a5e;color:#5ee4e0;border-radius:8px;padding:0 12px;font-size:16px;cursor:pointer;font-family:var(--aism-vt)}",
+      ".aism-hint{font-size:15px;color:#8f88b8;margin-top:5px}",
+      ".aism-err{font-size:15px;color:#ff5e6c;margin-top:6px;min-height:1px}",
+      ".aism-primary{background:#f5c542;color:#131028;padding:12px;width:100%;margin-top:4px}",
+      ".aism-primary[disabled]{opacity:.5;cursor:default}",
+      ".aism-alt{background:none;border:0;color:#5ee4e0;font-family:var(--aism-vt);font-size:16px;cursor:pointer;margin-top:12px;text-decoration:underline}",
+      ".aism-x{position:absolute;top:14px;right:16px;background:none;border:0;color:#8f88b8;font-size:22px;cursor:pointer;font-family:var(--aism-vt)}",
+      /* recovery-key screen */
+      ".aism-rk{background:#131028;border:1px dashed #f5c542;border-radius:10px;padding:14px;text-align:center;margin:6px 0 12px}",
+      ".aism-rk .key{font-family:var(--aism-px);font-size:13px;color:#f5c542;letter-spacing:1px;word-break:break-all;line-height:1.7}",
+      ".aism-rk .cpy{margin-top:10px;background:#221b44;border:1px solid #f5c542;color:#f5c542;border-radius:8px;padding:8px 12px;font-family:var(--aism-px);font-size:8px;cursor:pointer}",
+      ".aism-warn{font-size:17px;color:#ffd60a;line-height:1.3;margin:2px 0 12px}",
+      ".aism-check{display:flex;gap:9px;align-items:flex-start;font-size:17px;color:#cfc9ef;line-height:1.3;cursor:pointer;margin-bottom:12px}",
+      ".aism-check input{margin-top:3px;width:16px;height:16px;accent-color:#f5c542;flex:none}",
+      /* avatar picker */
+      ".aism-modal-wide{max-width:680px}",
+      ".aism-av-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:10px;padding:8px 18px 20px;max-height:58vh;overflow:auto}",
+      ".aism-av{background:#131028;border:2px solid #332a5e;border-radius:12px;padding:8px;cursor:pointer;text-align:center;color:#e8e4ff;font-family:var(--aism-vt)}",
+      ".aism-av:hover{border-color:var(--f)}",
+      ".aism-av.on{border-color:var(--f);box-shadow:inset 0 0 0 2px var(--f)}",
+      ".aism-av.locked{cursor:default;opacity:.7;filter:saturate(.45)}",
+      ".aism-av-pic{aspect-ratio:1;border-radius:8px;overflow:hidden;background:#221b44;display:flex;align-items:center;justify-content:center;margin-bottom:6px}",
+      ".aism-av-pic img{width:100%;height:100%;object-fit:cover}",
+      ".aism-av-lock{font-size:26px;opacity:.6}",
+      ".aism-av-name{font-family:var(--aism-px);font-size:8px;color:var(--f);line-height:1.4;min-height:22px;display:flex;align-items:center;justify-content:center}",
+      ".aism-av-meta{font-size:14px;color:#8f88b8;margin-top:3px;line-height:1.2}",
+      ".aism-av-unlock{color:#ffd60a}",
+      /* corner avatar thumbnail — big + clear */
+      ".aism-av-mini{width:42px;height:42px;border-radius:50%;overflow:hidden;flex:none;background:#221b44;border:2px solid #5ee4e0;display:inline-flex;align-items:center;justify-content:center;line-height:0}",
+      ".aism-av-mini img{width:100%;height:100%;object-fit:cover}",
+      ".aism-av-mini.empty{border-style:dashed;border-color:#5a5388;color:#8f88b8;font-family:var(--aism-vt);font-size:22px}",
+      /* first-game sign-up prompt (same modal chrome; shown once per device) */
+      ".aism-nudge{animation:aism-fade .18s ease-out;outline:none}",
+      "@keyframes aism-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}",
+      "@media (prefers-reduced-motion:reduce){.aism-nudge{animation:none}}",
+      ".aism-nudge .aism-body{padding-top:12px}",
+      ".aism-nudge-lead{display:flex;align-items:center;gap:10px;font-family:var(--aism-px);font-size:10px;color:#f5c542;line-height:1.7;margin:0 0 14px}",
+      ".aism-nudge-lead b{color:#fff}",
+      ".aism-nudge-list{list-style:none;margin:0 0 14px;padding:0}",
+      ".aism-nudge-list li{display:flex;gap:9px;align-items:flex-start;font-size:19px;color:#e8e4ff;line-height:1.25;margin:0 0 7px}",
+      ".aism-nudge-list li::before{content:'▸';color:#5ee4e0;flex:none}",
+      ".aism-nudge-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}",
+      ".aism-nudge-row .aism-btn{flex:1 1 150px;padding:13px 10px;border-radius:8px;font-size:9px;line-height:1.5}",
+      ".aism-nudge-go{background:#f5c542;color:#131028}",
+      ".aism-nudge-no{background:#221b44;color:#cfc9ef;border:1px solid #3a3568}",
+      ".aism-nudge-no:hover{border-color:#5ee4e0;color:#fff}",
+      ".aism-nudge-fine{font-size:15px;color:#8f88b8;margin-top:12px;text-align:center;line-height:1.3}",
+      /* friend codes */
+      ".aism-ref-code{font-family:var(--aism-px);font-size:22px;color:#f5c542;letter-spacing:6px;padding-left:6px}",
+      ".aism-ref-steps{list-style:none;margin:0 0 14px;padding:0}",
+      ".aism-ref-steps li{display:flex;gap:10px;align-items:center;font-size:18px;color:#e8e4ff;line-height:1.25;margin:0 0 8px}",
+      ".aism-ref-steps li b{flex:none;width:26px;height:26px;border-radius:50%;background:#221b44;border:1px solid #5ee4e0;color:#5ee4e0;font-family:var(--aism-px);font-size:9px;display:inline-flex;align-items:center;justify-content:center}",
+      ".aism-ref-stat{font-size:17px;color:#cfc9ef;text-align:center;margin:4px 0 2px}",
+      ".aism-ref-stat b{color:#f5c542}",
+      ".aism-ref-bar{height:8px;background:#131028;border:1px solid #332a5e;border-radius:99px;overflow:hidden;margin:6px 0 4px}",
+      ".aism-ref-bar i{display:block;height:100%;background:#5ee4e0}",
+      ".aism-ref-mine{background:#131028;border:1px solid #332a5e;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:16px;color:#cfc9ef;line-height:1.3}",
+      ".aism-ref-win{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 14px;font-family:var(--aism-px);font-size:11px;color:#5ee4e0;line-height:1.6;text-align:left}",
+      ".aism-ref-win b{color:#f5c542}",
+    ].join("\n");
+    document.head.appendChild(s);
+  }
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+
+  /* ---------------- Velvet Coin (pixel-art) ----------------
+   * A brand-coloured (violet + cyan V) pixel coin, drawn in the same crisp
+   * blocky style as the arcade's icon sprites. Self-contained so it works on
+   * every page. Callers add a class (e.g. aism-coin-win) to spin it. */
+  var COIN_MAP = [
+    "....EEEE....",
+    "..EELMMMEE..",
+    ".EDLMMMMMDE.",
+    ".EDVVMMVVDE.",
+    "EDMMVVVVMMDE",
+    "EDMMMVVMMMDE",
+    ".EDMMMMMMDE.",
+    ".EDMMMMMMDE.",
+    ".EDMMMMMMDE.",
+    ".EDDMMMMDDE.",
+    "..EEDDDDEE..",
+    "....EEEE...."
+  ];
+  var COIN_PAL = { E: "#34176a", D: "#5a2fb8", M: "#8b5cf6", L: "#b794ff", V: "#5ee4e0" };
+  function coinSvg(size, cls) {
+    var n = COIN_MAP.length, rects = "";
+    for (var y = 0; y < n; y++) {
+      var row = COIN_MAP[y];
+      for (var x = 0; x < row.length;) {
+        var ch = row.charAt(x);
+        if (ch === ".") { x++; continue; }
+        var s = x; while (x < row.length && row.charAt(x) === ch) x++;
+        rects += '<rect x="' + s + '" y="' + y + '" width="' + (x - s) + '" height="1" fill="' + COIN_PAL[ch] + '"/>';
+      }
+    }
+    return '<svg class="' + (cls || "") + '" width="' + size + '" height="' + size + '" viewBox="0 0 ' + n + " " + n +
+      '" style="shape-rendering:crispEdges;image-rendering:pixelated;vertical-align:middle" aria-hidden="true">' + rects + "</svg>";
+  }
+  auth._coin = coinSvg; // exposed for preview/testing
+
+  /* ---------------- UI: corner widget ---------------- */
+  auth.mountCorner = function (target) {
+    injectCss();
+    var host = document.getElementById("aism-auth-corner");
+    // Arcade pages have one HUD rail (quizzes/arcade.js) — the chip lives
+    // there, in the page's own layout, instead of floating over the game.
+    var rail = !target && document.querySelector(".ar-tools");
+    if (!host) { host = el("div"); host.id = "aism-auth-corner"; (target || rail || document.body).appendChild(host); }
+    else if (rail && host.parentNode !== rail) rail.appendChild(host);
+    if (rail) { host.classList.add("in-rail"); host.style.left = host.style.top = host.style.right = host.style.bottom = ""; }
+
+    // Draggable: default top-right (CSS), but the user can drag it off any
+    // button and we remember where they left it. Not inside the rail.
+    if (!host.classList.contains("in-rail")) (function applyPos() {
+      var p = null; try { p = JSON.parse(localStorage.getItem("aism-corner-pos") || "null"); } catch (e) {}
+      if (p && typeof p.left === "number" && typeof p.top === "number") {
+        var l = Math.min(Math.max(4, p.left), Math.max(4, window.innerWidth - 64));
+        var t = Math.min(Math.max(4, p.top), Math.max(4, window.innerHeight - 44));
+        host.style.left = l + "px"; host.style.top = t + "px"; host.style.right = "auto"; host.style.bottom = "auto";
+      }
+    })();
+    if (!host._dragInit) {
+      host._dragInit = true;
+      host.addEventListener("pointerdown", function (e) {
+        if (e.button != null && e.button !== 0) return;
+        if (host.classList.contains("in-rail")) return;
+        var r = host.getBoundingClientRect(), sx = e.clientX, sy = e.clientY, ox = r.left, oy = r.top, dragging = false;
+        host._dragged = false;
+        var mv = function (ev) {
+          var dx = ev.clientX - sx, dy = ev.clientY - sy;
+          if (!dragging && Math.abs(dx) + Math.abs(dy) > 5) { dragging = true; host._dragged = true; host.classList.add("dragging"); }
+          if (dragging) {
+            var nl = Math.min(Math.max(4, ox + dx), window.innerWidth - host.offsetWidth - 4);
+            var nt = Math.min(Math.max(4, oy + dy), window.innerHeight - host.offsetHeight - 4);
+            host.style.left = nl + "px"; host.style.top = nt + "px"; host.style.right = "auto"; host.style.bottom = "auto";
+            ev.preventDefault();
+          }
+        };
+        var up = function () {
+          document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", up);
+          host.classList.remove("dragging");
+          if (dragging) {
+            var r2 = host.getBoundingClientRect();
+            try { localStorage.setItem("aism-corner-pos", JSON.stringify({ left: Math.round(r2.left), top: Math.round(r2.top) })); } catch (e) {}
+            setTimeout(function () { host._dragged = false; }, 60); // let the click fire, then clear
+          }
+        };
+        document.addEventListener("pointermove", mv); document.addEventListener("pointerup", up);
+      });
+    }
+
+    function paint() {
+      host.innerHTML = "";
+      if (auth.isLoggedIn()) {
+        var bal = (walletSnap && typeof walletSnap.coins === "number") ? walletSnap.coins : 0;
+        var chip = el("div", "aism-corner-in");
+        var av = auth.avatar();
+        var avHtml = av
+          ? '<span class="aism-av-mini"><img alt="" src="' + avatarImg(av, 256) + "\" onerror=\"this.parentNode.classList.add('empty');this.parentNode.textContent='+';\"></span>"
+          : '<span class="aism-av-mini empty" title="Choose an avatar">+</span>';
+        chip.innerHTML = avHtml + '<span class="aism-coin" aria-hidden="true">' + coinSvg(20, "") + '</span><span class="bal">' + bal + "</span>";
+        chip.setAttribute("role", "button"); chip.setAttribute("tabindex", "0");
+        chip.setAttribute("aria-label", "Account: " + (auth.user() || "") + ", " + bal + " coins");
+        var open = function () { if (host._dragged) return; toggleMenu(host, chip); };
+        chip.addEventListener("click", open);
+        chip.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+        host.appendChild(chip);
+      } else {
+        var b = el("button", "aism-btn aism-corner-login");
+        b.innerHTML = '<span class="aism-coin" aria-hidden="true">' + coinSvg(18, "") + '</span>Log in';
+        b.addEventListener("click", function () { if (host._dragged) return; auth.open("login", { source: "corner" }); });
+        host.appendChild(b);
+      }
+    }
+    function toggleMenu(host, chip) {
+      var ex = host.querySelector(".aism-menu"); if (ex) { ex.remove(); return; }
+      var m = el("div", "aism-menu");
+      var bal = (walletSnap && typeof walletSnap.coins === "number") ? walletSnap.coins : 0;
+      var owned = (walletSnap && walletSnap.owned) ? walletSnap.owned.length : 0;
+      m.innerHTML = '<div class="row"><b>' + esc(auth.user() || "") + '</b></div>' +
+        '<div class="row">' + bal + ' coins · ' + owned + ' collected</div>';
+      var mkItem = function (label, fn, href) {
+        var b = href ? el("a", "aism-btn aism-corner-login") : el("button", "aism-btn aism-corner-login");
+        b.style.cssText = "width:100%;margin-top:8px;justify-content:center;text-decoration:none;box-sizing:border-box";
+        b.textContent = label;
+        if (href) b.href = href; else b.addEventListener("click", fn);
+        return b;
+      };
+      m.appendChild(mkItem("Choose avatar", function () { m.remove(); auth.openAvatars(); }));
+      m.appendChild(mkItem("Invite a friend", function () { m.remove(); auth.openInvite(); }));
+      m.appendChild(mkItem(fbDoneLocal() ? "Give feedback" : "Give feedback · +100", function () { m.remove(); auth.openFeedback({ where: "arcade menu" }); }));
+      // The Element Shop is on aistudymethod.com; the game is on velvetworlds.com, reached from the site through /velvet-worlds/ (22 Nov 2026).
+      m.appendChild(mkItem("Element Shop", null, SITE + "/classcraft/arcade/elements.html"));
+      m.appendChild(mkItem("Velvet Worlds", null, SITE ? "/" : "/velvet-worlds/"));
+      m.appendChild(mkItem("Log out", function () { auth.logout(); m.remove(); }));
+      host.appendChild(m);
+      // Place the menu on whichever side keeps it on screen (the chip may have been dragged anywhere).
+      var r = host.getBoundingClientRect();
+      var below = r.top < window.innerHeight * 0.5;
+      var rightSide = (r.left + r.width / 2) > window.innerWidth * 0.5;
+      m.style.top = below ? (host.offsetHeight + 8) + "px" : "auto";
+      m.style.bottom = below ? "auto" : (host.offsetHeight + 8) + "px";
+      m.style.left = rightSide ? "auto" : "0";
+      m.style.right = rightSide ? "0" : "auto";
+      setTimeout(function () {
+        var off = function (e) { if (!host.contains(e.target)) { m.remove(); document.removeEventListener("click", off); } };
+        document.addEventListener("click", off);
+      }, 0);
+    }
+    paint();
+    auth.onChange(paint);
+    if (Arcade.wallet && Arcade.wallet.onChange) Arcade.wallet.onChange(paint);
+    return host;
+  };
+
+  /* ---------------- UI: modal ---------------- */
+  auth.open = function (mode, opts) {
+    injectCss();
+    close();
+    openSource = (opts && opts.source) || "other";
+    var cur = mode || "login", finished = false;   // for "Signup form: closed"
+    var ov = el("div", "aism-ov"); ov.id = "aism-auth-ov";
+    var modal = el("div", "aism-modal");
+    ov.appendChild(modal);
+    ov.addEventListener("mousedown", function (e) { if (e.target === ov) close(); });
+    document.addEventListener("keydown", escClose);
+    document.body.appendChild(ov);
+    render(mode || "login");
+
+    function escClose(e) { if (e.key === "Escape") close(); }
+    function close2() {
+      document.removeEventListener("keydown", escClose); ov.remove();
+      if (!finished) track("Signup form: closed", { source: openSource || "other", step: cur });
+    }
+    auth._closeModal = close2;
+
+    function render(m) {
+      cur = m;
+      if (m === "register") track("Signup form: shown", { source: openSource || "other" });
+      modal.innerHTML = "";
+      var x = el("button", "aism-x", "✕"); x.setAttribute("aria-label", "Close"); x.addEventListener("click", close); modal.appendChild(x);
+      modal.appendChild(el("h2", null, m === "recover" ? "Recover account" : "Velvet Arcade"));
+      if (m !== "recover") {
+        var tabs = el("div", "aism-tabs");
+        [["login", "LOG IN"], ["register", "REGISTER"]].forEach(function (t) {
+          var b = el("button", "aism-tab" + (m === t[0] ? " on" : ""), t[1]);
+          b.addEventListener("click", function () { render(t[0]); });
+          tabs.appendChild(b);
+        });
+        modal.appendChild(tabs);
+      }
+      modal.appendChild(m === "login" ? loginForm() : m === "register" ? registerForm() : recoverForm());
+    }
+
+    function field(labelText, inputEl, hint) {
+      var f = el("div", "aism-field");
+      var l = el("label", null, esc(labelText)); f.appendChild(l);
+      f.appendChild(inputEl);
+      if (hint) f.appendChild(el("div", "aism-hint", esc(hint)));
+      return f;
+    }
+    function input(type, ph) { var i = el("input", "aism-input"); i.type = type; i.placeholder = ph || ""; i.autocomplete = "off"; i.autocapitalize = "off"; i.spellcheck = false; return i; }
+    function errBox() { return el("div", "aism-err", ""); }
+    function busy(btn, on, label) { btn.disabled = on; btn.textContent = on ? "…" : label; }
+
+    function loginForm() {
+      var body = el("div", "aism-body");
+      var u = input("text", "your username"); var p = input("password", "your password");
+      var err = errBox();
+      var btn = el("button", "aism-btn aism-primary", "Log in");
+      body.appendChild(field("Username", u));
+      body.appendChild(field("Password", p));
+      body.appendChild(err);
+      body.appendChild(btn);
+      var rec = el("button", "aism-alt", "Lost your password? Use your recovery key");
+      rec.addEventListener("click", function () { render("recover"); });
+      body.appendChild(rec);
+      var go = async function () {
+        err.textContent = ""; busy(btn, true, "Log in");
+        var r = await auth.login(u.value.trim(), p.value);
+        busy(btn, false, "Log in");
+        if (r.ok) { finished = true; close(); } else err.textContent = errText(r.error);
+      };
+      btn.addEventListener("click", go);
+      p.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
+      return body;
+    }
+
+    function registerForm() {
+      var body = el("div", "aism-body");
+      var uWrap = el("div", "aism-inrow");
+      var u = input("text", "username"); u.value = genUsername();
+      var reroll = el("button", "aism-reroll", "↻"); reroll.title = "Give me another"; reroll.type = "button";
+      reroll.addEventListener("click", function () { u.value = genUsername(); uErr.textContent = ""; });
+      uWrap.appendChild(u); uWrap.appendChild(reroll);
+      var uErr = el("div", "aism-err", "");
+      var uf = field("Choose a username", uWrap, "We've suggested one — tap ↻ for another, or type your own. Not your real name.");
+      uf.appendChild(uErr);
+
+      var p = input("password", "at least 8 characters");
+      var pf = field("Choose a password", p);
+      var pErr = el("div", "aism-err", ""); pf.appendChild(pErr);
+
+      // Friend code: hidden behind a link unless a ?ref= link filled it in.
+      var pre = storedRef();
+      var rc = input("text", "e.g. K7QM2P"); rc.value = pre; rc.maxLength = 8; rc.style.textTransform = "uppercase";
+      var rf = field("Friend code (optional)", rc, "You both get 100 coins once you've won 40 coins over 2 different days.");
+      var rErr = el("div", "aism-err", ""); rf.appendChild(rErr);
+      var rLink = el("button", "aism-alt", "Got a code from a friend?"); rLink.type = "button";
+      rLink.style.cssText = "margin:0 0 12px;display:block";
+      rLink.addEventListener("click", function () { rLink.remove(); rf.style.display = ""; rc.focus(); });
+      if (!pre) rf.style.display = "none";
+
+      var btn = el("button", "aism-btn aism-primary", "Create account");
+      var priv = el("div", "aism-hint");
+      priv.innerHTML = 'No name or email needed. Stored securely in the EU; deleted after 18 months unused. <a href="' + SITE + '/privacy.html#student-data" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">How we handle student data</a>';
+      body.appendChild(uf); body.appendChild(pf);
+      if (!pre) body.appendChild(rLink);
+      body.appendChild(rf); body.appendChild(btn); body.appendChild(priv);
+
+      var go = async function () {
+        uErr.textContent = ""; pErr.textContent = ""; rErr.textContent = "";
+        var pe = passwordError(p.value); if (pe) { pErr.textContent = pe; track("Signup form: error", { source: openSource || "other", error: "password-client" }); return; }
+        var raw = rc.value.trim(), code = raw ? cleanRef(raw) : "";
+        if (raw && !code) { rErr.textContent = errText("ref-code-invalid"); return; }
+        busy(btn, true, "Create account");
+        var r = await auth.register(u.value.trim(), p.value, code || undefined);
+        busy(btn, false, "Create account");
+        if (r.ok) {
+          track("Arcade signup: registered", { source: openSource || "other", friendCode: r.referral ? "yes" : "no" });
+          markNudge(); cur = "recovery"; recoveryScreen(r.recoveryKey, false, r.referral);
+          return;
+        }
+        track("Signup form: error", { source: openSource || "other", error: String(r.error || "unknown") });
+        if (r.error === "username-taken" || r.error === "username-invalid") uErr.textContent = errText(r.error);
+        else if (/^ref-code-/.test(r.error || "")) { rErr.textContent = errText(r.error); if (r.error === "ref-code-used-up" || r.error === "ref-code-own") clearRef(); }
+        else pErr.textContent = errText(r.error);
+      };
+      btn.addEventListener("click", go);
+      p.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
+      return body;
+    }
+
+    function recoverForm() {
+      var body = el("div", "aism-body");
+      var u = input("text", "your username");
+      var k = input("text", "VLVT-XXXX-XXXX-…");
+      var p = input("password", "new password (8+ chars)");
+      var err = errBox();
+      var btn = el("button", "aism-btn aism-primary", "Reset password");
+      body.appendChild(field("Username", u));
+      body.appendChild(field("Recovery key", k, "The VLVT- key you saved when you signed up."));
+      body.appendChild(field("New password", p));
+      body.appendChild(err);
+      body.appendChild(btn);
+      var back = el("button", "aism-alt", "← Back to log in"); back.addEventListener("click", function () { render("login"); });
+      body.appendChild(back);
+      var go = async function () {
+        err.textContent = "";
+        var pe = passwordError(p.value); if (pe) { err.textContent = pe; return; }
+        busy(btn, true, "Reset password");
+        var r = await auth.recover(u.value.trim(), k.value.trim(), p.value);
+        busy(btn, false, "Reset password");
+        if (r.ok) { finished = true; recoveryScreen(r.recoveryKey, true); } else err.textContent = errText(r.error);
+      };
+      btn.addEventListener("click", go);
+      return body;
+    }
+
+    function recoveryScreen(key, rotated, referral) {
+      modal.innerHTML = "";
+      modal.appendChild(el("h2", null, rotated ? "New recovery key" : "Save your recovery key"));
+      var body = el("div", "aism-body");
+      body.appendChild(el("div", "aism-warn", rotated
+        ? "Your password's reset and you're logged in. Your old key is now used up — here's a fresh one:"
+        : "You're in! This key is the ONLY way back if you forget your password. There's no email reset. Save it somewhere safe now."));
+      var rk = el("div", "aism-rk");
+      rk.appendChild(el("div", "key", esc(key)));
+      var cpy = el("button", "cpy", "Copy key");
+      cpy.addEventListener("click", function () { try { navigator.clipboard.writeText(key); cpy.textContent = "Copied ✓"; } catch (e) { cpy.textContent = "Select & copy it"; } });
+      rk.appendChild(cpy);
+      body.appendChild(rk);
+      if (referral) body.appendChild(el("div", "aism-hint", "Friend code added ✓ Win " + (referral.needCoins || 40) + " coins over " + (referral.needDays || 2) + " different days and you'll both get " + (referral.bonus || 100) + " coins."));
+      var lab = el("label", "aism-check");
+      var cb = el("input"); cb.type = "checkbox";
+      lab.appendChild(cb); lab.appendChild(document.createTextNode(" I've saved my recovery key somewhere safe."));
+      body.appendChild(lab);
+      var done = el("button", "aism-btn aism-primary", "Start playing"); done.disabled = true;
+      cb.addEventListener("change", function () { done.disabled = !cb.checked; });
+      done.addEventListener("click", function () {
+        if (!rotated) track("Signup: key confirmed", { source: openSource || "other" });
+        finished = true; close();
+      });
+      body.appendChild(done);
+      modal.appendChild(body);
+    }
+  };
+
+  function close() { if (auth._closeModal) { auth._closeModal(); auth._closeModal = null; } else { var o = document.getElementById("aism-auth-ov"); if (o) o.remove(); } }
+  auth.close = close;
+
+  /* ---------------- invite a friend (friend codes) ---------------- */
+  auth.openInvite = function () {
+    injectCss(); close();
+    var ov = el("div", "aism-ov"); ov.id = "aism-auth-ov";
+    var modal = el("div", "aism-modal"); modal.style.position = "relative";
+    ov.appendChild(modal);
+    ov.addEventListener("mousedown", function (e) { if (e.target === ov) close(); });
+    function escI(e) { if (e.key === "Escape") close(); }
+    document.addEventListener("keydown", escI);
+    auth._closeModal = function () { document.removeEventListener("keydown", escI); ov.remove(); };
+    document.body.appendChild(ov);
+    var x = el("button", "aism-x", "✕"); x.setAttribute("aria-label", "Close"); x.addEventListener("click", close);
+    modal.appendChild(x);
+    modal.appendChild(el("h2", null, "Invite a friend"));
+    var body = el("div", "aism-body", '<div class="aism-hint">Loading your code…</div>');
+    modal.appendChild(body);
+    track("Arcade referral: invite opened");
+
+    auth.referral().then(function (d) {
+      if (!d.ok) { body.innerHTML = '<div class="aism-err">' + esc(errText(d.error)) + "</div>"; return; }
+      var link = SHARE_URL + "?ref=" + encodeURIComponent(d.code);
+      var msg = "Revise with me on the Velvet Arcade! Sign up with my code " + d.code + " and we both get " + d.bonus + " coins: " + link;
+      body.innerHTML = "";
+      body.appendChild(el("ul", "aism-ref-steps",
+        "<li><b>1</b><span>Give a friend your code</span></li>" +
+        "<li><b>2</b><span>They enter it when they make an account</span></li>" +
+        "<li><b>3</b><span>They win " + d.needCoins + " coins over " + d.needDays + " different days, then you <i>both</i> get <span style='color:#f5c542'>" + d.bonus + "</span></span></li>"));
+      var box = el("div", "aism-rk");
+      box.appendChild(el("div", "aism-ref-code", esc(d.code)));
+      var row = el("div"); row.style.cssText = "display:flex;gap:8px;justify-content:center;flex-wrap:wrap";
+      var cpy = el("button", "cpy", "Copy code"), shr = el("button", "cpy", navigator.share ? "Share link" : "Copy link");
+      cpy.addEventListener("click", function () { try { navigator.clipboard.writeText(d.code); cpy.textContent = "Copied ✓"; } catch (e) { cpy.textContent = "Select & copy it"; } track("Arcade referral: code copied"); });
+      shr.addEventListener("click", function () {
+        track("Arcade referral: link shared");
+        if (navigator.share) { navigator.share({ text: msg }).catch(function () {}); return; }
+        try { navigator.clipboard.writeText(msg); shr.textContent = "Copied ✓"; } catch (e) { shr.textContent = "Couldn't copy"; }
+      });
+      row.appendChild(cpy); row.appendChild(shr); box.appendChild(row);
+      body.appendChild(box);
+      var pct = Math.min(100, Math.round(100 * d.rewarded / d.maxRewards));
+      body.appendChild(el("div", "aism-ref-stat", "Bonuses earned: <b>" + d.rewarded + "</b> of " + d.maxRewards +
+        (d.pending ? " · " + d.pending + " friend" + (d.pending === 1 ? "" : "s") + " still to play" : "")));
+      var bar = el("div", "aism-ref-bar", '<i style="width:' + pct + '%"></i>'); body.appendChild(bar);
+      if (d.rewarded >= d.maxRewards) body.appendChild(el("div", "aism-hint", "You've earned every friend bonus — thank you for spreading the word!"));
+      if (d.mine && d.mine.status === "pending") {
+        var days = Math.min(d.mine.playDays, d.needDays), coins = Math.min(d.mine.earned, d.needCoins);
+        body.appendChild(el("div", "aism-ref-mine", "<b style='color:#5ee4e0'>Your own friend bonus</b><br>" +
+          "Days you've won coins: " + days + " of " + d.needDays + " · Coins won: " + coins + " of " + d.needCoins));
+      }
+      body.appendChild(el("div", "aism-nudge-fine", "Only share it with people you know. We never see who you send it to."));
+    });
+  };
+
+  /* ---------------- feedback quest + mistake reports (Oct 2026) ----------------
+     Both go to the site's existing Formspree form (the feedback-survey one), with a
+     "form" field saying which is which. The feedback quest's coins come from the
+     server (/feedback): once per account, only after the account has won coins in
+     a lesson or game. The server checks the text but never stores it. Reports carry
+     a short ref; Billy pays REPORT coins through /report-bonus when he confirms one.
+     Plausible: "Feedback quest: opened" {state}, "Feedback quest: sent" {coins},
+     "Mistake report: opened", "Mistake report: sent" {signedIn}. */
+  var FORMSPREE = "https://formspree.io/f/mqevgjke";
+  var FB_DONE = "aism-fb-done";   // {<userId>: 1} once this account's quest is paid
+  function fbDoneLocal() { try { var d = JSON.parse(localStorage.getItem(FB_DONE) || "{}"); return !!(state && d[state.userId]); } catch (e) { return false; } }
+  function setFbDone() { try { var d = JSON.parse(localStorage.getItem(FB_DONE) || "{}"); if (state) { d[state.userId] = 1; localStorage.setItem(FB_DONE, JSON.stringify(d)); } } catch (e) {} }
+  // Same rule as the server's feedbackTextError: a real sentence, not one key held down.
+  function textOk(t) {
+    t = String(t || "").replace(/\s+/g, " ").trim();
+    if (t.length > 2000) return false;
+    var letters = (t.match(/[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u4E00-\u9FFF]/g) || []).length;
+    var words = t.split(" ").filter(function (w) { return /[A-Za-z\u00C0-\u024F\u0400-\u04FF\u4E00-\u9FFF]{2,}/.test(w); }).length;
+    var chars = t.replace(/\s/g, "").toLowerCase(), cnt = {}, most = 0, distinct = 0;
+    for (var i = 0; i < chars.length; i++) { var ch = chars[i]; if (!cnt[ch]) distinct++; cnt[ch] = (cnt[ch] || 0) + 1; if (cnt[ch] > most) most = cnt[ch]; }
+    return letters >= 25 && words >= 5 && distinct >= 8 && most <= chars.length * 0.4;
+  }
+  function sendForm(data) {
+    return fetch(FORMSPREE, { method: "POST", headers: { "content-type": "application/json", "accept": "application/json" }, body: JSON.stringify(data) })
+      .then(function (r) { return r.ok; }, function () { return false; });
+  }
+  function fbCss() {
+    if (document.getElementById("aism-fb-css")) return;
+    var s2 = document.createElement("style"); s2.id = "aism-fb-css";
+    s2.textContent =
+      ".aism-fb-q{font-size:18px;color:#cfc9ef;margin:0 0 7px;line-height:1.25}" +
+      ".aism-fb-q b{color:#5ee4e0;font-family:var(--aism-px);font-size:9px;margin-right:6px}" +
+      ".aism-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}" +
+      ".aism-chip{background:#131028;border:1px solid #332a5e;color:#e8e4ff;border-radius:999px;padding:6px 12px;font-family:var(--aism-vt);font-size:18px;cursor:pointer;line-height:1.1}" +
+      ".aism-chip:hover{border-color:#5ee4e0}" +
+      ".aism-chip.on{background:#5ee4e0;border-color:#5ee4e0;color:#131028}" +
+      ".aism-chip:focus-visible{outline:2px solid #f5c542;outline-offset:2px}" +
+      "textarea.aism-input{resize:vertical;min-height:84px;line-height:1.15}" +
+      ".aism-fb-badge{display:inline-block;background:#f5c542;color:#131028;border-radius:999px;padding:4px 10px;font-family:var(--aism-px);font-size:9px;margin:0 0 12px}" +
+      ".aism-fb-done{text-align:center;padding:6px 0 4px}" +
+      ".aism-fb-done .big{font-family:var(--aism-px);font-size:20px;color:#f5c542;margin:6px 0 10px}" +
+      ".aism-fb-done p{font-size:19px;color:#e8e4ff;line-height:1.3;margin:0 0 8px}" +
+      ".aism-fb-ref{font-family:var(--aism-px);font-size:12px;color:#f5c542;letter-spacing:1px}";
+    document.head.appendChild(s2);
+  }
+  function modalShell(title) {
+    injectCss(); fbCss(); close();
+    var ov = el("div", "aism-ov"); ov.id = "aism-auth-ov";
+    var modal = el("div", "aism-modal"); modal.style.position = "relative";
+    modal.style.maxHeight = "calc(100vh - 36px)"; modal.style.overflowY = "auto";
+    modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); modal.setAttribute("aria-label", title);
+    ov.appendChild(modal);
+    ov.addEventListener("mousedown", function (e) { if (e.target === ov) close(); });
+    function escF(e) { if (e.key === "Escape") close(); }
+    document.addEventListener("keydown", escF);
+    auth._closeModal = function () { document.removeEventListener("keydown", escF); ov.remove(); };
+    document.body.appendChild(ov);
+    var x = el("button", "aism-x", "✕"); x.setAttribute("aria-label", "Close"); x.addEventListener("click", close);
+    modal.appendChild(x);
+    modal.appendChild(el("h2", null, esc(title)));
+    var body = el("div", "aism-body"); modal.appendChild(body);
+    return body;
+  }
+  // One-choice chip row. Returns {el, value()}.
+  function chipRow(name, opts) {
+    var row = el("div", "aism-chips"), val = "";
+    row.setAttribute("role", "radiogroup"); row.setAttribute("aria-label", name);
+    opts.forEach(function (o) {
+      var b = el("button", "aism-chip", esc(o[1])); b.type = "button";
+      b.setAttribute("role", "radio"); b.setAttribute("aria-checked", "false");
+      b.addEventListener("click", function () {
+        val = o[0];
+        [].forEach.call(row.children, function (c) { c.classList.remove("on"); c.setAttribute("aria-checked", "false"); });
+        b.classList.add("on"); b.setAttribute("aria-checked", "true");
+        if (row._onPick) row._onPick();
+      });
+      row.appendChild(b);
+    });
+    return { el: row, value: function () { return val; } };
+  }
+  function lessonFromPath() { var m = /([a-z0-9-]+)-mini-lesson\.html/.exec(location.pathname); return m ? m[1] : ""; }
+
+  auth.feedbackStatus = async function () {
+    var r = await api("/feedback", { method: "GET", auth: true });
+    if (r.ok && r.data.claimed) setFbDone();
+    return r.ok ? Object.assign({ ok: true }, r.data) : { ok: false, error: r.error, status: r.status };
+  };
+  auth.feedbackDone = function () { return fbDoneLocal(); };
+
+  auth.openFeedback = function (opts) {
+    opts = opts || {};
+    if (!auth.isLoggedIn()) { auth.open("register", { source: "feedback" }); return; }
+    var body = modalShell("Feedback quest");
+    body.innerHTML = '<div class="aism-hint">Loading…</div>';
+    auth.feedbackStatus().then(function (st) {
+      var pay = !!(st.ok && st.eligible && !st.claimed);
+      var coins = (st.ok && st.coins) || 100;
+      var state0 = !st.ok ? "error" : st.claimed ? "claimed" : st.eligible ? "open" : "locked";
+      track("Feedback quest: opened", { state: state0 });
+      body.innerHTML = "";
+      if (pay) body.appendChild(el("div", "aism-fb-badge", "+" + coins + " coins"));
+      else if (st.ok && st.claimed) body.appendChild(el("div", "aism-hint", "You've had your " + coins + " coins for feedback. Thank you! You can still send more ideas."));
+      else if (st.ok) body.appendChild(el("div", "aism-hint", "Win some coins in a lesson or an arcade game first, then come back here for your " + coins + " coins. You can still send an idea now."));
+      if (!pay) body.lastChild.style.margin = "0 0 12px";
+      body.appendChild(el("p", "aism-fb-q", "<b>1</b>What were you trying to do today?"));
+      var goal = chipRow("What were you trying to do today?", [["learn", "Learn a topic"], ["practise", "Practise questions"], ["exam", "Exam prep"], ["games", "Play games"], ["other", "Something else"]]);
+      body.appendChild(goal.el);
+      body.appendChild(el("p", "aism-fb-q", "<b>2</b>Did you manage it?"));
+      var managed = chipRow("Did you manage it?", [["yes", "Yes"], ["partly", "Partly"], ["no", "No"]]);
+      body.appendChild(managed.el);
+      body.appendChild(el("p", "aism-fb-q", "<b>3</b>One thing that would make this site better for you"));
+      var ta = el("textarea", "aism-input"); ta.rows = 3; ta.maxLength = 2000; ta.placeholder = "I wish the arcade had…";
+      ta.setAttribute("aria-label", "One thing that would make this site better for you");
+      body.appendChild(ta);
+      body.appendChild(el("div", "aism-hint", "Don't write your name or school."));
+      var err = el("div", "aism-err"); err.setAttribute("role", "alert"); body.appendChild(err);
+      var go = el("button", "aism-btn aism-primary", pay ? "Send and claim " + coins + " coins" : "Send");
+      go.type = "button"; go.style.marginTop = "10px"; body.appendChild(go);
+      if (pay) body.appendChild(el("div", "aism-nudge-fine", "Once per account."));
+      var clr = function () { err.textContent = ""; };
+      ta.addEventListener("input", clr); goal.el._onPick = clr; managed.el._onPick = clr;
+      go.addEventListener("click", function () {
+        if (!goal.value()) { err.textContent = "Pick what you were trying to do (question 1)."; return; }
+        if (!managed.value()) { err.textContent = "Pick whether you managed it (question 2)."; return; }
+        if (!textOk(ta.value)) { err.textContent = "Write a bit more: one full sentence about something you'd change or add."; ta.focus(); return; }
+        go.disabled = true; go.textContent = "Sending…";
+        var text = ta.value.replace(/\s+/g, " ").trim();
+        sendForm({
+          form: "student-feedback", _subject: "Student feedback (feedback quest)",
+          trying_to: goal.value(), managed_it: managed.value(), idea: text,
+          page: location.pathname, lesson: lessonFromPath(), opened_from: opts.where || "", coins: pay ? "claimed" : "none",
+        }).then(function (sent) {
+          if (!sent) { go.disabled = false; go.textContent = pay ? "Send and claim " + coins + " coins" : "Send"; err.textContent = "Couldn't send just now. Check your connection and try again."; return; }
+          if (!pay) { track("Feedback quest: sent", { coins: "no" }); thanks(null); return; }
+          return api("/feedback", { body: { goal: goal.value(), managed: managed.value(), text: text }, auth: true }).then(function (r) {
+            if (r.ok) { setFbDone(); walletSnap = r.data.wallet; emit(); }
+            track("Feedback quest: sent", { coins: r.ok && r.data.paid ? "yes" : "no" });
+            thanks(r.ok && r.data.paid ? r.data.coins : null, r.ok && r.data.already);
+          });
+        });
+      });
+      function thanks(paid, already) {
+        body.innerHTML = '<div class="aism-fb-done">' +
+          (paid ? '<div class="big">+' + paid + ' coins</div>' : "") +
+          "<p>Thank you! We read every idea.</p>" +
+          (already ? '<p style="color:#8f88b8;font-size:17px">You\'d already had your feedback coins on this account.</p>' : "") +
+          "</div>";
+        var ok = el("button", "aism-btn aism-primary", "Done"); ok.type = "button"; ok.addEventListener("click", close); body.appendChild(ok);
+      }
+    });
+  };
+
+  auth.openReport = function (ctx) {
+    ctx = ctx || {};
+    var body = modalShell("Report a mistake");
+    track("Mistake report: opened");
+    if (ctx.heading) body.appendChild(el("div", "aism-hint", "On: <b style='color:#e8e4ff'>" + esc(ctx.heading) + "</b>" + (ctx.screen ? " (screen " + esc(ctx.screen) + ")" : "")));
+    if (body.lastChild) body.lastChild.style.margin = "0 0 12px";
+    body.appendChild(el("p", "aism-fb-q", "What's wrong?"));
+    var kind = chipRow("What's wrong?", [["answer", "Marked answer is wrong"], ["unclear", "Typo or unclear"], ["broken", "Something doesn't work"], ["other", "Something else"]]);
+    body.appendChild(kind.el);
+    var ta = el("textarea", "aism-input"); ta.rows = 3; ta.maxLength = 2000; ta.placeholder = "The answer says … but it should be …";
+    ta.setAttribute("aria-label", "Describe the mistake");
+    body.appendChild(ta);
+    var signed = auth.isLoggedIn();
+    body.appendChild(el("div", "aism-hint", signed
+      ? "If we confirm it, you get <b style='color:#f5c542'>20 coins</b>. Your username is sent with the report so we can pay you."
+      : "Thank you for helping. Log in first if you'd like 20 coins when we confirm a mistake."));
+    var err = el("div", "aism-err"); err.setAttribute("role", "alert"); body.appendChild(err);
+    var go = el("button", "aism-btn aism-primary", "Send report"); go.type = "button"; go.style.marginTop = "10px"; body.appendChild(go);
+    ta.addEventListener("input", function () { err.textContent = ""; }); kind.el._onPick = function () { err.textContent = ""; };
+    go.addEventListener("click", function () {
+      var t = ta.value.replace(/\s+/g, " ").trim();
+      if (!kind.value()) { err.textContent = "Pick what's wrong."; return; }
+      if (t.length < 10) { err.textContent = "Tell us a little more, so we can find it."; ta.focus(); return; }
+      var ref = ""; for (var i = 0; i < 6; i++) ref += "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".charAt(Math.floor(Math.random() * 32));
+      go.disabled = true; go.textContent = "Sending…";
+      sendForm({
+        form: "mistake-report", _subject: "Mistake report " + ref + (ctx.lesson || lessonFromPath() ? " — " + (ctx.lesson || lessonFromPath()) : ""),
+        ref: ref, what: kind.value(), details: t, page: ctx.page || location.pathname, screen: ctx.screen || "", screen_heading: ctx.heading || "",
+        username: signed ? auth.user() : "(not signed in)",
+      }).then(function (sent) {
+        if (!sent) { go.disabled = false; go.textContent = "Send report"; err.textContent = "Couldn't send just now. Check your connection and try again."; return; }
+        track("Mistake report: sent", { signedIn: signed ? "yes" : "no" });
+        body.innerHTML = '<div class="aism-fb-done"><p>Thank you! We\'ll check it.</p>' +
+          '<p style="color:#8f88b8;font-size:17px">Report ref <span class="aism-fb-ref">' + ref + "</span></p></div>";
+        var ok = el("button", "aism-btn aism-primary", "Done"); ok.type = "button"; ok.addEventListener("click", close); body.appendChild(ok);
+      });
+    });
+  };
+
+  /* ---------------- avatars ---------------- */
+  var avatarWait = null;   // callers waiting for avatars-data.js: it is fetched once, however many ask before it arrives (two fetches declared its constants twice: a page error)
+  function loadAvatars(cb) {
+    if (window.VELVET_AVATARS) return cb();
+    if (avatarWait) { avatarWait.push(cb); return; }
+    avatarWait = [cb];
+    var done = function () { var q = avatarWait || []; avatarWait = null; q.forEach(function (f) { f(); }); };
+    var s = document.querySelector('script[src*="avatars-data.js"]');   // the site header (site-account.js) may already be fetching it
+    if (s) { s.addEventListener("load", done); s.addEventListener("error", done); setTimeout(done, 4000); return; }   // the timer: in case that fetch had already failed
+    s = document.createElement("script");
+    s.src = AUTH_BASE + "avatars-data.js"; s.async = false;
+    s.onload = done; s.onerror = done;
+    (document.head || document.documentElement).appendChild(s);
+  }
+  function avatarRec(id) { var arr = window.VELVET_AVATARS || []; for (var i = 0; i < arr.length; i++) if (arr[i].id === id) return arr[i]; return null; }
+  function avatarImg(id, size) { var a = avatarRec(id); return a ? AUTH_BASE + "assets/avatars/" + (size || 256) + "/" + String(a.id).padStart(2, "0") + "-" + a.slug + ".webp" : ""; }
+
+  auth.avatar = function () { return walletSnap && walletSnap.avatar ? parseInt(walletSnap.avatar, 10) : null; };
+  auth.avatarImg = avatarImg;
+  auth.setAvatar = async function (id) {
+    var r = await api("/avatar", { body: { avatar: id }, auth: true });
+    if (r.ok) { walletSnap = r.data.wallet; emit(); return { ok: true }; }
+    return { ok: false, error: r.error };
+  };
+
+  // tiny select sound (honours the arcade mute flag)
+  var _ac2;
+  function actx2() { try { if (!_ac2) _ac2 = new (window.AudioContext || window.webkitAudioContext)(); if (_ac2.state === "suspended") _ac2.resume(); return _ac2; } catch (e) { return null; } }
+  function amuted() { try { return localStorage.getItem("aism-arcade-muted") === "1"; } catch (e) { return false; } }
+  function atone(f, d, ty, w, v) { var ac = actx2(); if (!ac || amuted()) return; var t = ac.currentTime + (w || 0), o = ac.createOscillator(), g = ac.createGain(); o.type = ty || "square"; o.frequency.value = f; o.connect(g); g.connect(ac.destination); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(v || .14, t + .008); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.start(t); o.stop(t + d + .03); }
+  function sfxSelect() { atone(880, .06, "square", 0, .12); atone(1245, .1, "triangle", .045, .12); }
+
+  auth.openAvatars = function () { injectCss(); loadAvatars(renderAvatarPicker); };
+  function renderAvatarPicker() {
+    close();
+    var ov = el("div", "aism-ov"); ov.id = "aism-auth-ov";
+    var modal = el("div", "aism-modal aism-modal-wide");
+    ov.appendChild(modal);
+    ov.addEventListener("mousedown", function (e) { if (e.target === ov) close(); });
+    document.addEventListener("keydown", escC);
+    document.body.appendChild(ov);
+    auth._closeModal = function () { document.removeEventListener("keydown", escC); ov.remove(); };
+    function escC(e) { if (e.key === "Escape") close(); }
+
+    var view = "all", fields = window.VELVET_AVATAR_FIELDS || {};
+    render();
+    function render() {
+      modal.innerHTML = "";
+      var x = el("button", "aism-x", "✕"); x.setAttribute("aria-label", "Close"); x.addEventListener("click", close); modal.appendChild(x);
+      modal.appendChild(el("h2", null, "Choose your avatar"));
+      var owned = (walletSnap && walletSnap.owned) ? walletSnap.owned.length : 0;
+      var unlockedN = (window.VELVET_AVATARS || []).filter(function (a) { return window.velvetAvatarUnlocked ? velvetAvatarUnlocked(a, walletSnap) : true; }).length;
+      var sub = el("div"); sub.style.cssText = "font-family:var(--aism-vt);font-size:16px;color:#8f88b8;padding:0 18px 4px";
+      sub.innerHTML = "<b style='color:#5ee4e0'>" + unlockedN + "</b> of " + (window.VELVET_AVATARS || []).length + " unlocked — collect elements to unlock more.";
+      modal.appendChild(sub);
+      var chips = el("div", "aism-tabs"); chips.style.flexWrap = "wrap";
+      [["all", "ALL"]].concat(Object.keys(fields).map(function (k) { return [k, fields[k].label.toUpperCase()]; })).forEach(function (t) {
+        var b = el("button", "aism-tab" + (view === t[0] ? " on" : ""), t[1]);
+        b.style.cssText = "flex:0 0 auto;border-radius:8px";
+        b.addEventListener("click", function () { view = t[0]; render(); });
+        chips.appendChild(b);
+      });
+      modal.appendChild(chips);
+      var grid = el("div", "aism-av-grid"), cur = auth.avatar();
+      (window.VELVET_AVATARS || []).filter(function (a) { return view === "all" || a.field === view; }).forEach(function (a) {
+        var unlocked = window.velvetAvatarUnlocked ? velvetAvatarUnlocked(a, walletSnap) : true;
+        var card = el("button", "aism-av" + (unlocked ? "" : " locked") + (cur === a.id ? " on" : ""));
+        var f = fields[a.field] || {};
+        card.style.setProperty("--f", f.color || "#8f88b8");
+        card.innerHTML =
+          '<div class="aism-av-pic">' + (unlocked
+            ? '<img loading="lazy" alt="" src="' + avatarImg(a.id, 256) + "\" onerror=\"this.style.display='none'\">"
+            : '<span class="aism-av-lock">🔒</span>') + "</div>" +
+          '<div class="aism-av-name">' + esc(a.name) + "</div>" +
+          '<div class="aism-av-meta">' + (unlocked ? esc((f.label || "") + " · " + a.dates)
+            : '<span class="aism-av-unlock">' + esc(window.velvetAvatarUnlockLabel ? velvetAvatarUnlockLabel(a) : "Locked") + "</span>") + "</div>";
+        if (unlocked) card.addEventListener("click", function () {
+          if (card.classList.contains("on")) return;
+          var on = card.parentNode ? card.parentNode.querySelectorAll(".aism-av.on") : [];
+          for (var k = 0; k < on.length; k++) on[k].classList.remove("on");
+          card.classList.add("on");            // instant highlight
+          sfxSelect();
+          auth.setAvatar(a.id).then(function (r) { if (!r.ok) render(); }); // background; revert on failure
+        });
+        grid.appendChild(card);
+      });
+      modal.appendChild(grid);
+    }
+  }
+
+  /* ---------------- end-of-game award hook ----------------
+   * Wraps Arcade.renderEndCard (the one shared end card across all cabinets).
+   * Logged in  -> bank coins on the server, show "+N coins".
+   * Logged out -> show "Rank X — worth N coins. Register to bank them" (the
+   *   rate, not a claim; no anonymous banking). Double-award guarded by opts. */
+  var GRADE_COINS = { S: 12, A: 9, B: 6, C: 3, D: 1 };
+  function gradeLetter(pct) { pct = Number(pct); return pct >= 95 ? "S" : pct >= 80 ? "A" : pct >= 60 ? "B" : pct >= 40 ? "C" : "D"; }
+  function coinDot() { return coinSvg(15, ""); }
+  function insertLine(mount, node) { var w = mount.querySelector(".ar-watermark"); if (w && w.parentNode === mount) mount.insertBefore(node, w); else mount.appendChild(node); }
+  // Win note sits near the TOP of the card (right after the grade) — "alongside
+  // the grade", the reward beat. Rotating coin is deliberate here.
+  function insertTop(mount, node) { mount.insertBefore(node, (mount.children && mount.children[1]) || null); }
+  function winHtml(credited, capRemaining) {
+    return coinSvg(28, "aism-coin-win")
+      + "<span>You won <b>" + credited + "</b> coin" + (credited === 1 ? "" : "s") + "!</span>"
+      + (capRemaining != null && capRemaining <= 12 ? '<span class="aism-win-cap">' + capRemaining + " left today</span>" : "");
+  }
+  function winNote(mount, credited, capRemaining) {
+    injectCss();
+    var d = el("div", "aism-win");
+    d.innerHTML = winHtml(credited, capRemaining);
+    insertTop(mount, d);
+    return d;
+  }
+  // Shown when a game earns 0 coins because today's 150-coin cap is already hit.
+  // The point of the cap is to bound coins, never the play — so the copy says so.
+  function capHtml() {
+    return coinSvg(22, "aism-coin-cap")
+      + "<span>Daily coin limit reached — <b>150/150</b> today. Keep playing; your coins reset tomorrow.</span>";
+  }
+  function capNote(mount) {
+    injectCss();
+    var d = el("div", "aism-cap");
+    d.innerHTML = capHtml();
+    insertTop(mount, d);
+    return d;
+  }
+  /* Coins promised on the card (L16, Oct 2026). A logged-out end card says
+     "worth N coins — an account keeps them", and the sign-up prompt repeats
+     it, but nothing banked that run after registering. The last unbanked run
+     on this page is remembered; registering or logging in within 30 minutes
+     banks it once (through the normal /award, so the daily cap applies) and
+     the card's register line turns into the coin win. */
+  var _pendingRun = null;   // { pct, mount, cta, at }
+  function bankPendingRun() {
+    var p = _pendingRun; _pendingRun = null;
+    if (!p || Date.now() - p.at > 30 * 60 * 1000) return;
+    auth.award(p.pct).then(function (res) {
+      if (!res || !res.ok) return;          // nothing claimed, nothing to correct
+      var cr = res.credited || 0, rem = res.wallet ? res.wallet.capRemaining : null;
+      if (p.cta && p.cta.parentNode) p.cta.remove();
+      if (!p.mount || !p.mount.isConnected) return;
+      if (cr > 0) winNote(p.mount, cr, rem); else capNote(p.mount);
+    }).catch(function () {});
+  }
+  function registerCta(mount, letter, worth) {
+    injectCss();
+    var d = el("div"); d.style.cssText = "text-align:center;margin:4px 0 12px";
+    d.innerHTML = '<div style="font-family:var(--aism-px);font-size:10px;color:#f5c542;margin-bottom:8px">' + coinDot() + " Rank " + letter + " — worth " + worth + " coins</div>";
+    var b = el("button", "aism-btn", "▸ Register to bank them");
+    b.style.cssText = "cursor:pointer;border:1px solid #5ee4e0;background:#221b44;color:#5ee4e0;border-radius:8px;padding:9px 14px;font-family:var(--aism-px);font-size:9px";
+    b.addEventListener("click", function () { auth.open("register", { source: "end card" }); });
+    d.appendChild(b);
+    insertLine(mount, d);
+    return d;
+  }
+
+  /* ---------------- first-game sign-up prompt (2026-09-28) ----------------
+   * Until now the only thing that ever ASKED a logged-out player to register
+   * was the small "Register to bank them" line under the score, and sign-ups
+   * stalled (6 accounts, none after 31 Aug). This is one dismissible card
+   * after the first end card a device sees: what an account gets you, then
+   * "Create account" or "Not now". It is never shown again either way.
+   * Rules: once per device (localStorage; in-memory fallback if storage is
+   * blocked), never while logged in, never on top of an open auth modal, and
+   * only if the end card is still on screen when the short delay elapses —
+   * a quick "Play again" must not get a pop-up mid-game (the prompt is then
+   * simply kept for a later end card). An account needs no name or email,
+   * so the ask stays inside the ICO Age-Appropriate Design Code's line on
+   * nudging children; "Not now" is as prominent as "Create account".
+   * Every outcome is a Plausible event so conversion is measured, not guessed. */
+  var NUDGE_LS = "aism-signup-prompt";
+  /* L17 (Oct 2026): the prompt used to open 1.8 s after the FIRST end card,
+     on top of the rank stamp and score count-up — the moment the card
+     exists for. Now, on any end card, it waits for the player's next move:
+     their first tap on Play again or Back/More games opens it, and "Not now"
+     carries on with that tap. From a device's second end card it may also
+     open by itself, once that card's reveal has finished. Still once per
+     device, either way. */
+  var NUDGE_DELAY = 4500;               // 2nd+ end card: after the reveal, count-up and confetti
+  var ENDS_LS = "aism-endcards-seen";
+  var endsMem = 0;                      // in-memory fallback when localStorage is unavailable
+  function bumpEnds() {
+    var n = 0;
+    try { n = (parseInt(localStorage.getItem(ENDS_LS), 10) || 0) + 1; localStorage.setItem(ENDS_LS, String(n)); }
+    catch (e) { n = ++endsMem; }
+    return n;
+  }
+  var nudgeDone = false;                // in-memory fallback when localStorage is unavailable
+  var _nudgedOpts = null;               // one attempt per end card
+  function nudgeSeen() { if (nudgeDone) return true; try { return localStorage.getItem(NUDGE_LS) === "1"; } catch (e) { return false; } }
+  function markNudge() { nudgeDone = true; try { localStorage.setItem(NUDGE_LS, "1"); } catch (e) {} }
+  function scheduleSignupPrompt(container, opts) {
+    if (window.AISM_NO_SIGNUP_PROMPT || auth.isLoggedIn() || nudgeSeen() || opts === _nudgedOpts) return;
+    _nudgedOpts = opts;
+    var pct = (opts && typeof opts.pct === "number" && isFinite(opts.pct)) ? opts.pct : null;
+    armExitPrompt(container, pct);
+    if (bumpEnds() < 2) return;           // first end card: never by itself
+    setTimeout(function () {
+      try {
+        if (auth.isLoggedIn() || nudgeSeen()) return;
+        if (document.getElementById("aism-auth-ov")) return;      // already registering / logging in
+        var card = container && container.querySelector ? container.querySelector(".ar-end") : null;
+        if (!card || !document.body.contains(card) || !card.getClientRects().length) return; // card gone: keep the prompt for later
+        showSignupPrompt(pct);
+      } catch (e) { /* the prompt must never break the arcade */ }
+    }, NUDGE_DELAY);
+  }
+  // The player's next move on this card (Play again, or a Back / More games
+  // link) opens the prompt first; "Not now" then carries the move out.
+  function armExitPrompt(container, pct) {
+    var card = container && container.querySelector ? container.querySelector(".ar-end") : null;
+    if (!card) return;
+    function onTap(ev) {
+      var t = ev.target && ev.target.closest ? ev.target.closest("#ar-again, a.ar-btn") : null;
+      if (!t || !card.contains(t)) return;
+      card.removeEventListener("click", onTap, true);
+      if (window.AISM_NO_SIGNUP_PROMPT || auth.isLoggedIn() || nudgeSeen() || document.getElementById("aism-auth-ov") || document.getElementById("aism-signup-ov")) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button > 0) return;   // new-tab clicks pass through
+      ev.preventDefault(); ev.stopPropagation();
+      showSignupPrompt(pct, function (why) {
+        if (why === "create") return;     // registering instead; the move is dropped
+        if (t.tagName === "A") { if (t.href) location.href = t.href; }
+        else if (t.isConnected) t.click();
+      });
+    }
+    card.addEventListener("click", onTap, true);
+  }
+  function showSignupPrompt(pct, after) {
+    injectCss();
+    markNudge();                          // shown = spent, whatever happens next (a reload never re-asks)
+    var letter = pct == null ? null : (Arcade.grade ? Arcade.grade(pct).letter : gradeLetter(pct));
+    var worth = letter ? (GRADE_COINS[letter] || 0) : 0;
+
+    var ov = el("div", "aism-ov"); ov.id = "aism-signup-ov";
+    var modal = el("div", "aism-modal aism-nudge");
+    modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); modal.setAttribute("aria-labelledby", "aism-nudge-h"); modal.tabIndex = -1;
+    ov.appendChild(modal);
+    var h = el("h2", null, "Keep what you win"); h.id = "aism-nudge-h"; modal.appendChild(h);
+    var body = el("div", "aism-body");
+    if (worth > 0) {
+      body.appendChild(el("div", "aism-nudge-lead", coinSvg(22, "") + "<span>That run was Rank <b>" + esc(letter) + "</b> — worth <b>" + worth + "</b> coin" + (worth === 1 ? "" : "s") + ". A free account keeps them.</span>"));
+    }
+    body.appendChild(el("ul", "aism-nudge-list",
+      "<li>Coins banked across every game you play</li>" +
+      "<li>Spend them on elements for your collection</li>" +
+      "<li>Up to 150 coins a day — the limit resets daily</li>"));
+    var row = el("div", "aism-nudge-row");
+    var go = el("button", "aism-btn aism-nudge-go", "Create account"); go.type = "button"; // no "▸": Press Start 2P lacks the glyph
+    var no = el("button", "aism-btn aism-nudge-no", "Not now"); no.type = "button";
+    row.appendChild(go); row.appendChild(no);
+    body.appendChild(row);
+    body.appendChild(el("div", "aism-nudge-fine", "No name or email — just a username and password.<br>We'll only ask once."));
+    modal.appendChild(body);
+
+    function dismiss(why) {
+      document.removeEventListener("keydown", onKey);
+      ov.remove();
+      track(why === "create" ? "Arcade signup prompt: create account" : "Arcade signup prompt: not now");
+      if (why === "create") auth.open("register", { source: "prompt" });
+      if (typeof after === "function") { try { after(why); } catch (e) {} }
+    }
+    function onKey(e) { if (e.key === "Escape") dismiss("not now"); }
+    go.addEventListener("click", function () { dismiss("create"); });
+    no.addEventListener("click", function () { dismiss("not now"); });
+    ov.addEventListener("mousedown", function (e) { if (e.target === ov) dismiss("not now"); });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+    try { modal.focus(); } catch (e) {}
+    track("Arcade signup prompt: shown");
+  }
+  auth._showSignupPrompt = showSignupPrompt; // exposed for preview/testing
+  var _lastCardOpts = null;
+  function installEndCardHook() {
+    if (!Arcade.renderEndCard || Arcade.renderEndCard.__authWrapped) return !!(Arcade.renderEndCard && Arcade.renderEndCard.__authWrapped);
+    var inner = Arcade.renderEndCard;
+    var wrapped = function (container, opts) {
+      var out = inner.call(this, container, opts);
+      try {
+        if (opts && opts !== _lastCardOpts && typeof opts.pct === "number" && isFinite(opts.pct)) {
+          _lastCardOpts = opts;
+          var letter = (Arcade.grade ? Arcade.grade(opts.pct).letter : gradeLetter(opts.pct));
+          var worth = GRADE_COINS[letter] || 0;
+          var mount = container && container.querySelector ? container.querySelector(".ar-end-inner") : null;
+          if (auth.isLoggedIn()) {
+            /* Optimistic reward beat (2026-08-26): the /award round-trip can
+               take seconds on a cold edge script, and the player used to
+               stare at a coin-less card until it returned. Show the EXPECTED
+               win instantly, predicted from the local wallet snapshot
+               (min(grade worth, capRemaining) — /pull at page boot supplies
+               capRemaining), then reconcile when the server answers. The
+               server stays the source of truth: the number is amended if it
+               disagrees, swaps to the cap note if the cap blocked it, and
+               becomes an honest failure line if banking never happened. */
+            var snap = auth.wallet();
+            var capRem = (snap && typeof snap.capRemaining === "number") ? snap.capRemaining : null;
+            var expected = (capRem == null) ? worth : Math.min(worth, capRem);
+            var note = null;
+            if (mount) {
+              if (expected > 0) note = winNote(mount, expected, (capRem == null) ? null : (capRem - expected));
+              else if (worth > 0) note = capNote(mount);
+            }
+            /* Optimistic balance (Oct 2026): the corner chip used to keep the
+               old balance until /award answered (seconds on a cold edge
+               script). Bump the cached wallet by the expected win now; the
+               server's wallet replaces it when /award returns, and a failed
+               award restores the previous snapshot. */
+            var before = walletSnap;
+            if (expected > 0 && walletSnap && typeof walletSnap.coins === "number") {
+              walletSnap = Object.assign({}, walletSnap, {
+                coins: walletSnap.coins + expected,
+                capRemaining: (capRem == null) ? walletSnap.capRemaining : Math.max(0, capRem - expected)
+              });
+              emit();
+            }
+            auth.award(opts.pct).then(function (res) {
+              if ((!res || !res.ok) && walletSnap !== before && auth.isLoggedIn()) { walletSnap = before; emit(); }
+              if (!mount) return;
+              if (!res || !res.ok) {
+                // Banking failed — never leave a win claim standing that the
+                // server didn't honour.
+                if (note) {
+                  note.className = "aism-cap";
+                  note.innerHTML = coinSvg(22, "aism-coin-cap")
+                    + "<span>Couldn't reach the coin bank — this run wasn't banked. Your score still counts.</span>";
+                }
+                return;
+              }
+              var cr = res.credited || 0;
+              var rem = res.wallet ? res.wallet.capRemaining : null;
+              if (res.referralBonus > 0) {
+                injectCss();
+                var rb = el("div", "aism-ref-win", coinSvg(28, "aism-coin-win") + "<span>Friend bonus unlocked! <b>+" + res.referralBonus + "</b> coins — and your friend gets " + res.referralBonus + " too.</span>");
+                insertTop(mount, rb);
+                track("Arcade referral: bonus unlocked");
+              }
+              if (cr > 0) {
+                if (note) { note.className = "aism-win"; note.innerHTML = winHtml(cr, rem); }
+                else winNote(mount, cr, rem);
+              } else {
+                if (note) { note.className = "aism-cap"; note.innerHTML = capHtml(); }
+                else capNote(mount);
+              }
+            });
+          } else if (worth > 0) {
+            var cta = mount ? registerCta(mount, letter, worth) : null;
+            _pendingRun = { pct: opts.pct, mount: mount, cta: cta, at: Date.now() };
+          }
+        }
+      } catch (e) { /* the end card must never break */ }
+      try { if (opts) scheduleSignupPrompt(container, opts); } catch (e) { /* never break the card */ }
+      return out;
+    };
+    wrapped.__authWrapped = true;
+    Arcade.renderEndCard = wrapped;
+    return true;
+  }
+
+  /* ---------------- one-time apology credit (Nov 2026) ----------------
+     The winter treat was not being paid 10-16 Nov 2026. Every account that existed when it was
+     fixed gets 100 coins once (server campaign "winter-sorry-2026", /treat) and sees this message
+     once, on whichever device first asks. Other devices get paid:false and show nothing.
+     Safe to delete after 1 Mar 2027, together with the sorryCheck() calls. */
+  var SORRY = { id: "winter-sorry-2026", until: Date.UTC(2027, 2, 1), hub: SITE + "/classcraft/adventures/winter-lessons.html" };
+  var sorryBusy = false;
+  function sorryCheck() {
+    if (sorryBusy || !state || !state.token || !state.userId || Date.now() >= SORRY.until) return;
+    var key = "aism-note:" + SORRY.id + ":" + state.userId;
+    try { if (localStorage.getItem(key)) return; } catch (e) { return; }
+    sorryBusy = true;
+    auth.treat(SORRY.id).then(function (r) {
+      sorryBusy = false;
+      if (r && (r.ok || r.status === 410)) { try { localStorage.setItem(key, "1"); } catch (e) {} }   // answered for good
+      if (r && r.ok && r.paid) sorryShow(r.coins || 100);
+      // 400 = the server has not been published with this campaign yet: ask again on the next page.
+    }, function () { sorryBusy = false; });
+  }
+  function sorryShow(coins) {
+    if (!document.body || document.querySelector(".aism-sorry")) return;
+    var css = document.createElement("style");
+    css.textContent =
+      ".aism-sorry{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(27,26,58,.6);font-family:'Nunito',system-ui,sans-serif}" +
+      ".aism-sorry .bx{max-width:440px;width:100%;background:#2B2A55;color:#fff;border:3px solid #fff;border-radius:22px;padding:22px 20px 18px;text-align:center;box-shadow:0 10px 0 rgba(0,0,0,.25)}" +
+      ".aism-sorry h2{font-family:'Fredoka','Nunito',system-ui,sans-serif;font-weight:600;font-size:1.45rem;line-height:1.25;margin:0 0 10px;color:#fff}" +
+      ".aism-sorry p{font-size:1rem;line-height:1.45;margin:0 0 10px;color:#e4e0f5}.aism-sorry p b{color:#FFC83D}" +
+      ".aism-sorry .bt{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}" +
+      ".aism-sorry a,.aism-sorry button{font-family:'Fredoka','Nunito',system-ui,sans-serif;font-weight:600;font-size:1rem;border:3px solid #fff;border-radius:14px;padding:9px 14px;cursor:pointer;text-decoration:none}" +
+      ".aism-sorry a{background:#FFC83D;color:#2c2840}.aism-sorry button{background:transparent;color:#fff}";
+    document.head.appendChild(css);
+    var d = document.createElement("div");
+    d.className = "aism-sorry"; d.setAttribute("role", "dialog"); d.setAttribute("aria-modal", "true"); d.setAttribute("aria-labelledby", "aism-sorry-h");
+    d.innerHTML = '<div class="bx"><h2 id="aism-sorry-h">Sorry, our mistake</h2>' +
+      "<p>From 10 to 16 November the Winter treat was not being added when it should have been.</p>" +
+      "<p>To put it right, we have added <b>" + coins + " bonus coins</b> to every account, including yours.</p>" +
+      "<p>It is fixed now. Finish any Winter Lesson to win the <b>100-coin Winter treat</b>.</p>" +
+      '<div class="bt"><a href="' + SORRY.hub + '">See the Winter Lessons</a><button type="button">OK</button></div></div>';
+    function close() { document.removeEventListener("keydown", onKey); d.remove(); }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    d.querySelector("button").addEventListener("click", close);
+    d.querySelector("a").addEventListener("click", function () { track("Apology credit: winter lessons opened"); });
+    d.addEventListener("click", function (e) { if (e.target === d) close(); });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(d);
+    try { d.querySelector("button").focus(); } catch (e) {}
+    track("Apology credit: shown");
+  }
+
+  /* ---------------- boot ---------------- */
+  function boot() {
+    if (!installEndCardHook()) { var n = 0, t = function () { if (installEndCardHook() || ++n > 40) return; setTimeout(t, 50); }; setTimeout(t, 50); }
+    if (!window.AISM_NO_CORNER) { try { auth.mountCorner(); } catch (e) {} }
+    if (auth.isLoggedIn()) { auth.pull(); loadAvatars(function () { emit(); }); } // refresh from server + load avatar art
+    sorryCheck();
+    auth.onChange(function (d) { if (d && d.loggedIn) { setTimeout(sorryCheck, 1500); } });   // after a log-in on this device
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+
+  Arcade.auth = auth;
+})();
