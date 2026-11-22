@@ -3,61 +3,135 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Velvet Worlds: collect elements, open worlds | AI Study Method</title>
-<meta name="description" content="Collect the 118 elements with Velvet Coins from revision at AI Study Method. Each element opens a world to explore. Find protons, neutrons and electrons, build atoms and bond them into compound weapons.">
-<!-- velvetworlds.com: the game's own domain (22 Nov 2026). The files under /velvet-worlds/, /classcraft/ and /fonts/ are copies
-     from the AI Study Method site folder, made by tools/sync-from-site.sh. This page belongs to this folder. -->
+<title>Velvet Worlds: games you unlock by studying | AI Study Method</title>
+<meta name="description" content="Velvet Worlds is the home of the AI Study Method games. Do lessons on aistudymethod.com to earn Velvet Coins, then spend them here to unlock games and features.">
+<!-- velvetworlds.com: the hub that lists the game types (22 Nov 2026). Velvet Blaster is at /blaster/. This page belongs to this folder. -->
 <link rel="canonical" href="https://velvetworlds.com/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link href="/fonts/lesson-fonts.css?v=20261116" rel="stylesheet">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-<link href="/velvet-worlds/app.css?v=20261119c" rel="stylesheet">
-<!-- Privacy-friendly analytics by Plausible -->
-<script async src="https://plausible.io/js/pa-y_3K19wHddzHShFk02JEm.js"></script>
+<style>
+  :root{--bg:#06061c;--bg2:#0b0b2e;--panel:#10103a;--panel2:#161650;--cyan:#00f0ff;--magenta:#ff2d95;--yellow:#ffd83d;--green:#39ff14;--text:#e9e9ff;--dim:#8a8ac0;--line:#2e2e7c;--drop:#02020c;
+    --px:'Press Start 2P',monospace;--disp:'Fredoka','Trebuchet MS',sans-serif;--body:'Nunito',-apple-system,'Segoe UI',sans-serif}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--body);color:var(--text);min-height:100vh;padding:16px 16px 60px;
+    background:radial-gradient(900px 500px at 15% -10%,#2a1a6e55,transparent 70%),radial-gradient(800px 500px at 100% 0%,#0b4a6e44,transparent 70%),linear-gradient(180deg,var(--bg),var(--bg2))}
+  .wrap{max-width:1040px;margin:0 auto}
+  a{color:var(--cyan)}
+  h1,h2,h3,button,.btn{font-family:var(--disp)}
+  .marquee{text-align:center;margin:44px 0 18px}
+  .marquee .over{font:600 12px var(--disp);letter-spacing:4px;color:var(--green)}
+  .marquee h1{font-family:var(--px);font-weight:400;font-size:clamp(22px,5vw,42px);line-height:1.3;color:var(--yellow);margin:10px 0;text-shadow:0 0 16px #ffd83d66,3px 3px 0 #7a5a00}
+  .deal{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px 18px;background:var(--panel);border:3px solid var(--yellow);border-radius:18px;padding:14px 18px;box-shadow:0 5px 0 var(--drop);margin-bottom:22px}
+  .deal p{font:600 clamp(15px,2.2vw,19px) var(--disp);line-height:1.4;text-align:center;flex:1 1 420px}
+  .deal .coins{display:flex;align-items:center;gap:8px;font:700 20px var(--disp);color:var(--yellow);white-space:nowrap}
+  .deal .coins[hidden]{display:none}
+  .deal .coins small{font:600 11px var(--disp);letter-spacing:1.5px;color:var(--dim);text-transform:uppercase}
+  .games{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+  .game{background:var(--panel);border:3px solid var(--line);border-radius:22px;box-shadow:0 6px 0 var(--drop);overflow:hidden;display:flex;flex-direction:column}
+  .game.main{grid-column:1 / -1;border-color:var(--cyan)}
+  .game .art{display:grid;grid-template-columns:repeat(4,1fr);background:#050518}
+  .game .art img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}
+  .game .icon{height:120px;display:flex;align-items:center;justify-content:center;background:#0a0a28;border-bottom:3px solid var(--line)}
+  .game .icon svg{width:84px;height:84px}
+  .game .txt{padding:16px 18px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
+  .game h2{font-size:24px;font-weight:600}
+  .game.main h2{font-size:30px;color:var(--yellow)}
+  .game p{font-size:16px;line-height:1.45}
+  .tag{align-self:flex-start;font:600 11px var(--disp);letter-spacing:1.5px;text-transform:uppercase;border-radius:99px;padding:3px 10px;border:2px solid var(--line);color:var(--dim)}
+  .tag.live{border-color:var(--green);color:var(--green)}
+  .row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:auto;padding-top:6px}
+  .go{display:inline-block;font:600 20px var(--disp);background:var(--yellow);color:#1a1300;border:3px solid #fff3b0;border-radius:14px;padding:10px 26px;box-shadow:0 4px 0 var(--drop);cursor:pointer;text-decoration:none}
+  .go:hover,.want:hover{filter:brightness(1.12)} .go:active,.want:active{transform:translateY(3px);box-shadow:0 1px 0 var(--drop)}
+  .want{font:600 15px var(--disp);color:var(--text);background:var(--panel2);border:3px solid var(--line);border-radius:14px;padding:8px 14px;box-shadow:0 4px 0 var(--drop);cursor:pointer}
+  .want[disabled]{color:var(--green);border-color:var(--green);cursor:default;filter:none;transform:none}
+  .go:focus-visible,.want:focus-visible,a:focus-visible{outline:3px solid var(--cyan);outline-offset:2px}
+  .soft{color:var(--dim);font-size:14px}
+  footer{text-align:center;margin-top:28px}
+  @media (max-width:640px){.games{grid-template-columns:1fr}.game .art{grid-template-columns:repeat(2,1fr)}.marquee{margin-top:64px}}
+</style>
+<!-- Privacy-friendly analytics by Plausible (the velvetworlds.com site) -->
+<script async src="https://plausible.io/js/pa-I70W_gNHtNMWaKve7MIsY.js"></script>
 <script>
   window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
   plausible.init()
 </script>
 </head>
 <body>
-<div id="vw-app"></div>
-<noscript><p style="color:#e9e9ff;text-align:center;padding:40px">Velvet Worlds needs JavaScript. <a href="https://aistudymethod.com/" style="color:#00f0ff">AI Study Method</a></p></noscript>
+<div class="wrap">
+  <header class="marquee">
+    <div class="over">AI STUDY METHOD PRESENTS</div>
+    <h1>VELVET WORLDS</h1>
+  </header>
+  <section class="deal" aria-label="How it works">
+    <p>Do lessons on <a href="https://aistudymethod.com/" data-out="lessons">aistudymethod.com</a> to earn Velvet Coins. Spend them here to unlock games and features.</p>
+    <div class="coins" id="coinBox" hidden><span aria-hidden="true">&#9679;</span><span id="coinNum">0</span><small>your coins</small></div>
+  </section>
+  <main class="games">
+    <article class="game main">
+      <div class="art" aria-hidden="true"><img src="/velvet-worlds/img/banner-moon.webp" alt=""><img src="/velvet-worlds/img/banner-pirate.webp" alt=""><img src="/velvet-worlds/img/banner-neon.webp" alt=""><img src="/velvet-worlds/img/banner-tundra.webp" alt=""></div>
+      <div class="txt">
+        <span class="tag live">Play now</span>
+        <h2>Velvet Blaster</h2>
+        <p>Every element of the periodic table is a world. Collect an element, explore its world, answer questions for ammo and pop the robots. The first world is free.</p>
+        <div class="row"><a class="go" id="playBlaster" href="/blaster/">Play</a><span class="soft">Needs a computer with a keyboard and a mouse.</span></div>
+      </div>
+    </article>
+    <article class="game">
+      <div class="icon" aria-hidden="true"><svg viewBox="0 0 84 84" fill="none"><path d="M30 12v56" stroke="#e9e9ff" stroke-width="4" stroke-linecap="round"/><path d="M30 14l30 10-30 12z" fill="#ff2d95"/><ellipse cx="34" cy="70" rx="24" ry="6" fill="#39ff14" opacity=".55"/><circle cx="52" cy="64" r="5" fill="#fff"/></svg></div>
+      <div class="txt">
+        <span class="tag">Coming soon</span>
+        <h2>Velvet Golf</h2>
+        <p>A golf game for after your revision. We are still deciding what to build first.</p>
+        <div class="row"><button class="want" type="button" data-want="Velvet Golf">I want this one</button></div>
+      </div>
+    </article>
+    <article class="game">
+      <div class="icon" aria-hidden="true"><svg viewBox="0 0 84 84" fill="none"><path d="M14 12v60" stroke="#e9e9ff" stroke-width="4" stroke-linecap="round"/><g><rect x="16" y="14" width="52" height="36" fill="#e9e9ff"/><path d="M16 14h13v12H16zM42 14h13v12H42zM29 26h13v12H29zM55 26h13v12H55zM16 38h13v12H16zM42 38h13v12H42z" fill="#10103a"/></g></svg></div>
+      <div class="txt">
+        <span class="tag">Coming soon</span>
+        <h2>Velvet Racing</h2>
+        <p>A racing game, asked for by students. We hope to have it ready soon.</p>
+        <div class="row"><button class="want" type="button" data-want="Velvet Racing">I want this one</button></div>
+      </div>
+    </article>
+  </main>
+  <footer class="soft">Velvet Worlds is made by <a href="https://aistudymethod.com/">AI Study Method</a>. <a href="https://aistudymethod.com/privacy.html">Privacy</a></footer>
+</div>
 <script>
-/* Settings for the shared scripts, then the sign-in handoff, then the scripts themselves.
-   A student who was signed in on aistudymethod.com arrives with "#ho=<code>" on the address. The code works once and for
-   60 seconds. It is swapped at the accounts server for this domain's own sign-in before the page's scripts start, so the
-   page opens signed in. The code is taken off the address at once. If the swap fails the page opens signed out. */
-window.AISM_NO_SIGNUP_PROMPT = true; window.VW_MODE = "full"; window.AISM_SITE = "https://aistudymethod.com";
-(function () {
-  var API = String(window.AISM_ACCOUNTS_URL || "https://aism-accounts-7aktx.bunny.run").replace(/\/+$/, "");
-  var V = "20261122a";
-  var SCRIPTS = ["/classcraft/arcade/elements-data.js", "/classcraft/arcade/auth.js?v=" + V, "/classcraft/quizzes/share-score.js", "/velvet-worlds/app.js?v=" + V];
-  function start() {
-    var i = 0;
-    (function next() {
-      if (i >= SCRIPTS.length) return;
-      var s = document.createElement("script"); s.src = SCRIPTS[i++]; s.onload = next; s.onerror = next; document.body.appendChild(s);
-    })();
+window.AISM_NO_SIGNUP_PROMPT = true; window.AISM_SITE = "https://aistudymethod.com";
+window.VW_SCRIPTS = ["/classcraft/arcade/auth.js?v=20261122b"];
+window.VW_READY = function () {
+  var auth = window.Arcade && window.Arcade.auth;
+  function track(name) { try { if (typeof window.plausible === "function") window.plausible(name); } catch (e) {} }
+  function paint() {
+    var w = auth && auth.isLoggedIn() ? auth.wallet() : null, box = document.getElementById("coinBox");
+    box.hidden = !(auth && auth.isLoggedIn());
+    document.getElementById("coinNum").textContent = w && typeof w.coins === "number" ? w.coins : 0;
+    var played = false; try { played = !!localStorage.getItem("vw-wins") || !!localStorage.getItem("vw-local"); } catch (e) {}
+    document.getElementById("playBlaster").textContent = played ? "Continue" : "Play";
   }
-  var m = /[#&]ho=([^&]+)/.exec(location.hash || "");
-  if (!m) { start(); return; }
-  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
-  var code = ""; try { code = decodeURIComponent(m[1]); } catch (e) {}
-  var started = false; function once() { if (!started) { started = true; start(); } }
-  setTimeout(once, 6000);                                      // a slow server must not leave a blank page
-  fetch(API + "/handoff-claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: code }) })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (d) {
-      if (d && d.token && d.userId && !started) {
-        try { localStorage.setItem("aism-auth", JSON.stringify({ token: d.token, userId: d.userId, username: d.username })); } catch (e) {}
-        try { if (d.wallet) localStorage.setItem("aism-wallet", JSON.stringify({ uid: d.userId, w: d.wallet })); else localStorage.removeItem("aism-wallet"); } catch (e) {}
-        try { if (typeof window.plausible === "function") window.plausible("Velvet Worlds: arrived signed in"); } catch (e) {}
-      }
-    })
-    .catch(function () {})
-    .then(once);
-})();
+  if (auth) auth.onChange(paint);
+  paint();
+  document.getElementById("playBlaster").addEventListener("click", function () { track("Hub: open Velvet Blaster"); });
+  var out = document.querySelector('a[data-out="lessons"]'); if (out) out.addEventListener("click", function () { track("Hub: go to lessons"); });
+  /* "I want this one": counted once per device, as a Plausible event only. Nothing about the visitor is stored. */
+  var KEY = "vw-want";
+  function wanted() { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } }
+  [].forEach.call(document.querySelectorAll("button[data-want]"), function (b) {
+    var g = b.getAttribute("data-want");
+    function done() { b.disabled = true; b.textContent = "Counted. Thank you!"; }
+    if (wanted()[g]) done();
+    b.addEventListener("click", function () {
+      if (b.disabled) return;
+      track("Hub: want " + g);
+      var w = wanted(); w[g] = 1; try { localStorage.setItem(KEY, JSON.stringify(w)); } catch (e) {}
+      done();
+    });
+  });
+};
 </script>
+<script src="/handoff.js?v=20261122b"></script>
 </body>
 </html>
