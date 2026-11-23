@@ -8,16 +8,16 @@
   var root = document.getElementById("vg-app");
   var SITE = window.AISM_SITE || "https://aistudymethod.com";
   var ENGINE = "/velvet-worlds/game/index", ENGINE_BYTES = 39514754;   // the same engine files as Velvet Blaster
-  var PCK = "/golf/game/golf.pck", PCK_V = "20261123j", PCK_BYTES = 2547584;
+  var PCK = "/golf/game/golf.pck", PCK_V = "20261123k", PCK_BYTES = 5578784;
   var PACKS = "/velvet-worlds/packs/", PACKS_V = "20261122c";
   var LS_LOCAL = "vg-local", LS_SEL = "vg-course";
 
   /* The same two tables as the accounts server (GOLF_COURSES and GOLF_ITEMS in aism-accounts-edge-script.ts).
      golf-server-test.mjs fails if they differ. Change them there first. */
   var GOLF_COURSES = {
-    "electron": { price: 0, pars: [9] },
-    "up": { price: 20, pars: [] },
-    "down": { price: 40, pars: [] },
+    "electron": { price: 0, pars: [9, 10, 12] },
+    "up": { price: 20, pars: [8, 11, 10] },
+    "down": { price: 40, pars: [8, 10, 11] },
     "photon": { price: 60, pars: [] },
     "gluon": { price: 80, pars: [] },
     "strange": { price: 100, pars: [] },
@@ -50,13 +50,13 @@
   /* What the lobby shows for each course. row and col place it on the chart. Charge and spin are the only particle
      figures shown; anything more must be checked against the Particle Data Group's tables before it is added. */
   var INFO = {
-    "up": { sym: "u", name: "Up quark", fam: "quark", row: 1, col: 1, charge: "+⅔", spin: "½", place: "Summit Trail", twist: "Every hole climbs." },
+    "up": { sym: "u", name: "Up quark", fam: "quark", row: 1, col: 1, charge: "+⅔", spin: "½", place: "Summit Trail", twist: "Every hole climbs. A putt that is too soft rolls back down." },
     "charm": { sym: "c", name: "Charm quark", fam: "quark", row: 1, col: 2, charge: "+⅔", spin: "½", place: "Storybook Village", twist: "Moving bridges and a stream that carries the ball." },
     "top": { sym: "t", name: "Top quark", fam: "quark", row: 1, col: 3, charge: "+⅔", spin: "½", place: "Rooftops", twist: "The heaviest ball, and gaps between the towers." },
     "gluon": { sym: "g", name: "Gluon", fam: "gauge", row: 1, col: 4, charge: "0", spin: "1", place: "Sweet Factory", twist: "The ball is on an elastic tether." },
     "higgs": { sym: "H", name: "Higgs boson", fam: "scalar", row: 1, col: 5, charge: "0", spin: "0", place: "Crystal Vault", twist: "Gates that change the ball's mass." },
     "graviton": { sym: "G", name: "Graviton", fam: "tensor", row: 1, col: 6, charge: "0", spin: "2", place: "Deep Space", twist: "Small planets with their own gravity.", hyp: true },
-    "down": { sym: "d", name: "Down quark", fam: "quark", row: 2, col: 1, charge: "−⅓", spin: "½", place: "The Mine", twist: "Every hole descends." },
+    "down": { sym: "d", name: "Down quark", fam: "quark", row: 2, col: 1, charge: "−⅓", spin: "½", place: "The Mine", twist: "Every hole descends. Mine carts cross on rails: wait for a gap." },
     "strange": { sym: "s", name: "Strange quark", fam: "quark", row: 2, col: 2, charge: "−⅓", spin: "½", place: "Giant's Bedroom", twist: "You are tiny, and toy cars cross the track." },
     "bottom": { sym: "b", name: "Bottom quark", fam: "quark", row: 2, col: 3, charge: "−⅓", spin: "½", place: "Sea Floor", twist: "Water drag, currents and bubble vents." },
     "photon": { sym: "γ", name: "Photon", fam: "gauge", row: 2, col: 4, charge: "0", spin: "1", place: "Night Funfair", twist: "Mirror walls and bank shots." },
@@ -212,7 +212,8 @@
     ORDER.forEach(function (c) { h += tile(c); });
     h += '</div><div class="key"><span><i style="background:var(--quark)"></i>Quarks</span><span><i style="background:var(--lepton)"></i>Leptons</span><span><i style="background:var(--gauge)"></i>Gauge bosons</span><span><i style="background:var(--scalar)"></i>Higgs boson</span><span><i style="background:var(--tensor)"></i>Graviton (hypothetical)</span></div></section>';
     h += '<section class="card">' + infoPanel() + shopPanel() + "</section></div>";
-    h += '<footer>Velvet Golf is made by <a href="' + SITE + '/">AI Study Method</a>. <a href="' + SITE + '/privacy.html">Privacy</a></footer></div>';
+    h += '<footer>Velvet Golf is made by <a href="' + SITE + '/">AI Study Method</a>. <a href="' + SITE + '/privacy.html">Privacy</a>'
+      + '<br>Models and sounds: <a href="https://kenney.nl/" rel="noopener">Kenney</a>, <a href="https://quaternius.com/" rel="noopener">Quaternius</a> and <a href="https://www.kaylousberg.com/" rel="noopener">Kay Lousberg (KayKit)</a>, given to the public domain (CC0). Fonts: Fredoka and Nunito (SIL Open Font License).</footer></div>';
     h += '<div id="stage" hidden><canvas id="canvas" tabindex="0"></canvas><div id="loading"><div id="loadText">Loading Velvet Golf…</div><progress id="loadBar" max="100" value="0"></progress></div></div>';
     root.innerHTML = h;
   }
