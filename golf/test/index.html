@@ -110,7 +110,18 @@ body {
 
 		<script src="/velvet-worlds/game/index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args": [], "canvasResizePolicy": 2, "emscriptenPoolSize": 8, "ensureCrossOriginIsolationHeaders": false, "executable": "/velvet-worlds/game/index", "experimentalVK": false, "fileSizes": {"golf.pck": 2536096, "/velvet-worlds/game/index.wasm": 39514754}, "focusCanvas": true, "gdextensionLibs": [], "godotPoolSize": 4, "mainPack": "golf.pck"};
+const GODOT_CONFIG = {"args": [], "canvasResizePolicy": 2, "emscriptenPoolSize": 8, "ensureCrossOriginIsolationHeaders": false, "executable": "/velvet-worlds/game/index", "experimentalVK": false, "fileSizes": {"golf.pck": 2547136, "/velvet-worlds/game/index.wasm": 39514754}, "focusCanvas": true, "gdextensionLibs": [], "godotPoolSize": 4, "mainPack": "golf.pck"};
+// ?stub pretends to be the golf page: a signed-in account with a red ball, aim level 1, two bought mulligans and two questions.
+// What the game tells the page is printed to the console as VGEVENT lines.
+if (/[?&]stub\b/.test(location.search)) {
+	window.vgState = { signedIn: true, page: true, course: 'electron', level: 1,
+		golf: { equip: { ball: 'ball-red' }, upgrades: { 'up-aim': 1 }, items: { 'boost-mulligan': 2 } },
+		questions: [
+			{ id: 'stub-1', stem: 'Stub question one: which option is marked correct?', options: [{ text: 'This one is correct', correct: true }, { text: 'Not this one', correct: false }, { text: 'Nor this one', correct: false }], explanation: 'A stub explanation.' },
+			{ id: 'stub-2', stem: 'Stub question two: which option is marked correct?', options: [{ text: 'This one is correct', correct: true }, { text: 'Not this one', correct: false }], explanation: 'A stub explanation.' }
+		] };
+	window.vgEvent = function (e) { console.log('VGEVENT ' + JSON.stringify(e)); };
+}
 // test switches: ?hole=2 starts at a hole; ?selftest runs the checks and prints them to the console
 (function () {
 	const allowed = ['selftest', 'hole', 'course', 'bot', 'botonly', 'bothole', 'bottrace'];
