@@ -8,7 +8,7 @@
   var root = document.getElementById("vg-app");
   var SITE = window.AISM_SITE || "https://aistudymethod.com";
   var ENGINE = "/velvet-worlds/game/index", ENGINE_BYTES = 39514754;   // the same engine files as Velvet Blaster
-  var PCK = "/golf/game/golf.pck", PCK_V = "20261123k", PCK_BYTES = 5578784;
+  var PCK = "/golf/game/golf.pck", PCK_V = "20261123m", PCK_BYTES = 5691852;
   var PACKS = "/velvet-worlds/packs/", PACKS_V = "20261122c";
   var LS_LOCAL = "vg-local", LS_SEL = "vg-course";
 
@@ -18,7 +18,7 @@
     "electron": { price: 0, pars: [9, 10, 12] },
     "up": { price: 20, pars: [8, 11, 10] },
     "down": { price: 40, pars: [8, 10, 11] },
-    "photon": { price: 60, pars: [] },
+    "photon": { price: 60, pars: [7, 9, 10] },
     "gluon": { price: 80, pars: [] },
     "strange": { price: 100, pars: [] },
     "charm": { price: 120, pars: [] },
@@ -59,7 +59,7 @@
     "down": { sym: "d", name: "Down quark", fam: "quark", row: 2, col: 1, charge: "−⅓", spin: "½", place: "The Mine", twist: "Every hole descends. Mine carts cross on rails: wait for a gap." },
     "strange": { sym: "s", name: "Strange quark", fam: "quark", row: 2, col: 2, charge: "−⅓", spin: "½", place: "Giant's Bedroom", twist: "You are tiny, and toy cars cross the track." },
     "bottom": { sym: "b", name: "Bottom quark", fam: "quark", row: 2, col: 3, charge: "−⅓", spin: "½", place: "Sea Floor", twist: "Water drag, currents and bubble vents." },
-    "photon": { sym: "γ", name: "Photon", fam: "gauge", row: 2, col: 4, charge: "0", spin: "1", place: "Night Funfair", twist: "Mirror walls and bank shots." },
+    "photon": { sym: "γ", name: "Photon", fam: "gauge", row: 2, col: 4, charge: "0", spin: "1", place: "Night Funfair", twist: "Mirrors: the ball leaves at the angle it arrived. The pale blue line shows the bounce." },
     "electron": { sym: "e", name: "Electron", fam: "lepton", row: 3, col: 1, charge: "−1", spin: "½", place: "Circuit City", twist: "Charged posts. Your ball is negative: red + posts pull it, blue − posts push it away." },
     "muon": { sym: "μ", name: "Muon", fam: "lepton", row: 3, col: 2, charge: "−1", spin: "½", place: "Pyramid Dig", twist: "The ball lasts only seconds, and a faster ball lasts longer." },
     "tau": { sym: "τ", name: "Tau", fam: "lepton", row: 3, col: 3, charge: "−1", spin: "½", place: "Volcano Ruins", twist: "A heavy ball, and tiles that crumble behind it." },
