@@ -81,10 +81,10 @@
     <article class="game">
       <div class="icon" aria-hidden="true"><svg viewBox="0 0 84 84" fill="none"><path d="M30 12v56" stroke="#e9e9ff" stroke-width="4" stroke-linecap="round"/><path d="M30 14l30 10-30 12z" fill="#ff2d95"/><ellipse cx="34" cy="70" rx="24" ry="6" fill="#39ff14" opacity=".55"/><circle cx="52" cy="64" r="5" fill="#fff"/></svg></div>
       <div class="txt">
-        <span class="tag">Coming soon</span>
+        <span class="tag live">Play now</span>
         <h2>Velvet Golf</h2>
-        <p>A golf game for after your revision. We are still deciding what to build first.</p>
-        <div class="row"><button class="want" type="button" data-want="Velvet Golf">I want this one</button></div>
+        <p>Mini-golf where every course is named after a particle. Three courses so far: Electron, which is free, then Up quark and Down quark. More are on the way.</p>
+        <div class="row"><a class="go" id="playGolf" href="/golf/">Play</a><span class="soft">Needs a computer with a mouse.</span></div>
       </div>
     </article>
     <article class="game">
@@ -115,6 +115,7 @@ window.VW_READY = function () {
   if (auth) auth.onChange(paint);
   paint();
   document.getElementById("playBlaster").addEventListener("click", function () { track("Hub: open Velvet Blaster"); });
+  document.getElementById("playGolf").addEventListener("click", function () { track("Hub: open Velvet Golf"); });
   var out = document.querySelector('a[data-out="lessons"]'); if (out) out.addEventListener("click", function () { track("Hub: go to lessons"); });
   /* "I want this one": counted once per device, as a Plausible event only. Nothing about the visitor is stored. */
   var KEY = "vw-want";
