@@ -3,15 +3,54 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Velvet Blaster: collect elements, open worlds | Velvet Worlds</title>
-<meta name="description" content="Velvet Blaster, a Velvet Worlds game. Collect the 118 elements with Velvet Coins from revision at AI Study Method. Each element opens a world to explore.">
+<title>Velvet Blaster: a 3D periodic table adventure game | Velvet Worlds</title>
+<meta name="description" content="Every element of the periodic table is a world to explore. Answer questions from your course (KS3, GCSE, A-level, IB or AP), find the hidden pieces and finish each level. The first world is free.">
 <!-- velvetworlds.com/blaster/: the periodic-table game. The files under /velvet-worlds/, /classcraft/ and /fonts/ are copies
      from the AI Study Method site folder, made by tools/sync-from-site.sh. This page belongs to this folder. -->
 <link rel="canonical" href="https://velvetworlds.com/blaster/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Velvet Worlds">
+<meta property="og:title" content="Velvet Blaster: a 3D periodic table adventure game | Velvet Worlds">
+<meta property="og:description" content="Every element of the periodic table is a world to explore. Answer questions from your course (KS3, GCSE, A-level, IB or AP), find the hidden pieces and finish each level. The first world is free.">
+<meta property="og:url" content="https://velvetworlds.com/blaster/">
+<meta property="og:image" content="https://velvetworlds.com/assets/og/velvet-blaster.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Velvet Blaster: four of its element worlds">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Velvet Blaster: a 3D periodic table adventure game | Velvet Worlds">
+<meta name="twitter:description" content="Every element of the periodic table is a world to explore. Answer questions from your course (KS3, GCSE, A-level, IB or AP), find the hidden pieces and finish each level. The first world is free.">
+<meta name="twitter:image" content="https://velvetworlds.com/assets/og/velvet-blaster.jpg">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  "name": "Velvet Blaster",
+  "url": "https://velvetworlds.com/blaster/",
+  "description": "Every element of the periodic table is a world to explore. Answer questions from your course (KS3, GCSE, A-level, IB or AP), find the hidden pieces and finish each level. The first world is free.",
+  "image": "https://velvetworlds.com/assets/og/velvet-blaster.jpg",
+  "genre": [
+    "Educational",
+    "Adventure"
+  ],
+  "gamePlatform": "Web browser",
+  "playMode": "SinglePlayer",
+  "inLanguage": "en-GB",
+  "audience": {
+    "@type": "EducationalAudience",
+    "educationalRole": "student"
+  },
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "Velvet Worlds",
+    "url": "https://velvetworlds.com/"
+  }
+}
+</script>
 <link href="/fonts/lesson-fonts.css?v=20261116" rel="stylesheet">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="/assets/landing.css?v=20261124a" rel="stylesheet">
 <link href="/velvet-worlds/app.css?v=20261123f" rel="stylesheet">
 <!-- Privacy-friendly analytics by Plausible (the velvetworlds.com site) -->
 <script async src="https://plausible.io/js/pa-I70W_gNHtNMWaKve7MIsY.js"></script>
@@ -21,8 +60,24 @@
 </script>
 </head>
 <body>
-<div id="vw-app"></div>
+<div id="vw-app"><div class="wrap"><header class="marquee"><h1>Velvet Blaster</h1></header><p>Loading the periodic table&hellip;</p></div></div>
 <noscript><p style="color:#e9e9ff;text-align:center;padding:40px">Velvet Blaster needs JavaScript. <a href="/" style="color:#00f0ff">Velvet Worlds</a></p></noscript>
+<section class="vw-about" aria-labelledby="aboutBlaster">
+  <h2 id="aboutBlaster">About Velvet Blaster</h2>
+  <p class="lead">Velvet Blaster is a 3D adventure game built on the periodic table. Every element is a world, from a castle and a coral reef to a frozen tundra and a crystal cave. Collect an element with Velvet Coins and its world opens.</p>
+  <h3>How it works</h3>
+  <ol>
+    <li>Choose your course. The questions change with it; the worlds stay the same.</li>
+    <li>Explore the world and find the pieces hidden in it. Answer questions to recharge your blaster, and pop the robots and monsters that get in the way.</li>
+    <li>Take the pieces back to the base for the level&rsquo;s final task. Each level you finish puts a star over the element: bronze, silver or gold.</li>
+    <li>Protons, neutrons and electrons are hidden in every world. Build them into atoms, then bond the atoms into compounds in the Forge to make new blasters.</li>
+  </ol>
+  <h3>Courses</h3>
+  <p>KS3 science (chemistry topics so far). GCSE biology, chemistry and physics, Foundation and Higher (the questions follow the AQA specifications). A-level biology, chemistry and physics for AQA, OCR A, Edexcel, Eduqas and CCEA. IB Diploma biology, chemistry and physics at SL and HL. AP Biology, AP Chemistry, AP Physics 1, AP Physics 2 and AP Physics C.</p>
+  <h3>What you need</h3>
+  <p>A computer with a keyboard and a mouse. On a phone or tablet you can collect elements, but the worlds need a computer. The first world is free. The others open with Velvet Coins, earned from mini-lessons and the Revision Arcade on <a href="https://aistudymethod.com/">aistudymethod.com</a>.</p>
+  <p class="soft"><a href="/about/">How Velvet Worlds works</a> &middot; Also in Velvet Worlds: <a href="/golf/">Velvet Golf</a>, mini-golf through the Standard Model.</p>
+</section>
 <script>
 window.AISM_NO_SIGNUP_PROMPT = true; window.VW_MODE = "full"; window.AISM_SITE = "https://aistudymethod.com";
 window.VW_HUB_URL = "/"; window.VW_GAME_NAME = "Velvet Blaster";

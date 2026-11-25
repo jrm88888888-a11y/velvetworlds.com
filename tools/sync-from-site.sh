@@ -3,7 +3,8 @@
 # The game is still developed and tested in the site folder; this folder is what gets published at velvetworlds.com.
 # Run after any change to the game, the packs, auth.js or the element pictures, then commit and push THIS folder.
 #   tools/sync-from-site.sh ["/path/to/AI Study Method"]
-# It only copies; it never deletes. index.html, CNAME, robots.txt and 404.html belong to this folder and are not touched.
+# It only copies; it never deletes. index.html, blaster/, golf/, about/, assets/, sitemap.xml, CNAME, robots.txt and 404.html belong
+# to this folder and are not touched. Notes on this site: AI Study Method/_dev/velvet-worlds/velvetworlds-site-notes.md (not published).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SITE="${1:-$HERE/../AI Study Method}"

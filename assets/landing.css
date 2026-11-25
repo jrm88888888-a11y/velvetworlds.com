@@ -1,0 +1,20 @@
+/* velvetworlds.com: the text sections under each game (/blaster/, /golf/) and the /about/ page.
+   This file belongs to this folder (not copied from the AI Study Method site). */
+@font-face{font-family:'Press Start 2P';font-style:normal;font-weight:400;font-display:swap;src:url(/assets/fonts/PressStart2P.woff2) format('woff2')}
+.vw-about{max-width:1040px;margin:34px auto 0;background:#10103a;border:3px solid #2e2e7c;border-radius:22px;box-shadow:0 6px 0 #02020c;padding:22px 24px 24px;font-family:'Nunito',-apple-system,'Segoe UI',sans-serif;color:#e9e9ff;line-height:1.55}
+.vw-about h1,.vw-about h2,.vw-about h3{font-family:'Fredoka','Trebuchet MS',sans-serif;font-weight:600;line-height:1.25}
+.vw-about h1{font-size:30px;color:#ffd83d;margin:0 0 10px}
+.vw-about h2{font-size:24px;color:#ffd83d;margin:0 0 10px}
+.vw-about h3{font-size:19px;color:#00f0ff;margin:20px 0 6px}
+.vw-about p,.vw-about li{font-size:16px;margin:0 0 8px}
+.vw-about ol,.vw-about ul{padding-left:22px;margin:0 0 8px}
+.vw-about a{color:#00f0ff}
+.vw-about .lead{font-size:18px}
+.vw-about .soft{color:#8a8ac0;font-size:14px}
+body.vw-playing .vw-about,body.vg-playing .vw-about{display:none}
+/* the /about/ page */
+body.vw-page{margin:0;min-height:100vh;padding:16px 16px 60px;color:#e9e9ff;font-family:'Nunito',-apple-system,'Segoe UI',sans-serif;
+  background:radial-gradient(900px 500px at 15% -10%,#2a1a6e55,transparent 70%),radial-gradient(800px 500px at 100% 0%,#0b4a6e44,transparent 70%),linear-gradient(180deg,#06061c,#0b0b2e)}
+.vw-page .back{display:inline-block;margin:6px 0 0;color:#00f0ff;font-family:'Fredoka','Trebuchet MS',sans-serif;font-weight:600;text-decoration:none}
+.vw-page footer{text-align:center;margin-top:26px;color:#8a8ac0;font-size:14px}
+.vw-page footer a{color:#00f0ff}

@@ -3,15 +3,54 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Velvet Golf: mini-golf through the Standard Model | Velvet Worlds</title>
-<meta name="description" content="Velvet Golf, a Velvet Worlds game. Mini-golf courses named after the particles of the Standard Model: Electron, Up quark, Down quark and Photon so far. Earn Velvet Coins from revision at AI Study Method and spend them here.">
+<title>Velvet Golf: particle physics mini golf | Velvet Worlds</title>
+<meta name="description" content="Mini-golf courses named after the particles of the Standard Model, each with its own physics twist: charged posts on Electron, mirrors on Photon. Answer questions from your course to win mulligans. The Electron course is free.">
 <!-- velvetworlds.com/golf/: the golf game's lobby, shop and game. Launched 23 Nov 2026: the hub links here.
      The files under /velvet-worlds/, /classcraft/ and /fonts/ are copies from the AI Study Method site folder. This page belongs to this folder. -->
 <link rel="canonical" href="https://velvetworlds.com/golf/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Velvet Worlds">
+<meta property="og:title" content="Velvet Golf: particle physics mini golf | Velvet Worlds">
+<meta property="og:description" content="Mini-golf courses named after the particles of the Standard Model, each with its own physics twist: charged posts on Electron, mirrors on Photon. Answer questions from your course to win mulligans. The Electron course is free.">
+<meta property="og:url" content="https://velvetworlds.com/golf/">
+<meta property="og:image" content="https://velvetworlds.com/assets/og/velvet-golf.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Velvet Golf: a putting green beside the electron, up quark, down quark and photon">
+<meta property="og:locale" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Velvet Golf: particle physics mini golf | Velvet Worlds">
+<meta name="twitter:description" content="Mini-golf courses named after the particles of the Standard Model, each with its own physics twist: charged posts on Electron, mirrors on Photon. Answer questions from your course to win mulligans. The Electron course is free.">
+<meta name="twitter:image" content="https://velvetworlds.com/assets/og/velvet-golf.jpg">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  "name": "Velvet Golf",
+  "url": "https://velvetworlds.com/golf/",
+  "description": "Mini-golf courses named after the particles of the Standard Model, each with its own physics twist: charged posts on Electron, mirrors on Photon. Answer questions from your course to win mulligans. The Electron course is free.",
+  "image": "https://velvetworlds.com/assets/og/velvet-golf.jpg",
+  "genre": [
+    "Educational",
+    "Sports"
+  ],
+  "gamePlatform": "Web browser",
+  "playMode": "SinglePlayer",
+  "inLanguage": "en-GB",
+  "audience": {
+    "@type": "EducationalAudience",
+    "educationalRole": "student"
+  },
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "Velvet Worlds",
+    "url": "https://velvetworlds.com/"
+  }
+}
+</script>
 <link href="/fonts/lesson-fonts.css?v=20261116" rel="stylesheet">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="/assets/landing.css?v=20261124a" rel="stylesheet">
 <link href="/golf/app.css?v=20261123a" rel="stylesheet">
 <!-- Privacy-friendly analytics by Plausible (the velvetworlds.com site) -->
 <script async src="https://plausible.io/js/pa-I70W_gNHtNMWaKve7MIsY.js"></script>
@@ -21,8 +60,25 @@
 </script>
 </head>
 <body>
-<div id="vg-app"></div>
+<div id="vg-app"><div class="wrap"><header class="marquee"><h1>Velvet Golf</h1></header><p>Loading the courses&hellip;</p></div></div>
 <noscript><p style="color:#e9e9ff;text-align:center;padding:40px">Velvet Golf needs JavaScript. <a href="/" style="color:#00f0ff">Velvet Worlds</a></p></noscript>
+<section class="vw-about" aria-labelledby="aboutGolf">
+  <h2 id="aboutGolf">About Velvet Golf</h2>
+  <p class="lead">Velvet Golf is mini-golf with one course for each particle of the Standard Model, plus the hypothetical graviton: 18 courses in all. Each course has three levels of three holes, and its twist comes from its particle.</p>
+  <h3>Courses so far</h3>
+  <ul>
+    <li><b>Electron</b> (free), Circuit City: charged posts. Your ball is negative, so red + posts pull it and blue &minus; posts push it away.</li>
+    <li><b>Up quark</b>, Summit Trail: every hole climbs, and a putt that is too soft rolls back down.</li>
+    <li><b>Down quark</b>, The Mine: every hole descends, and mine carts cross on rails.</li>
+    <li><b>Photon</b>, Night Funfair: mirrors. The ball leaves a mirror at the angle it arrived.</li>
+  </ul>
+  <p>More courses are on the way. Each level gives a bronze, silver or gold star.</p>
+  <h3>Questions and mulligans</h3>
+  <p>Answer questions from your course to win mulligans, which take back a putt. The course you choose in <a href="/blaster/">Velvet Blaster</a> sets the questions.</p>
+  <h3>What you need</h3>
+  <p>A computer with a mouse. The Electron course is free; the others open with Velvet Coins, earned from mini-lessons and the Revision Arcade on <a href="https://aistudymethod.com/">aistudymethod.com</a>.</p>
+  <p class="soft"><a href="/about/">How Velvet Worlds works</a> &middot; Also in Velvet Worlds: <a href="/blaster/">Velvet Blaster</a>, a 3D periodic table adventure.</p>
+</section>
 <script>
 window.AISM_NO_SIGNUP_PROMPT = true; window.AISM_SITE = "https://aistudymethod.com";
 window.VW_SCRIPTS = ["/classcraft/arcade/auth.js?v=20261122b", "/golf/app.js?v=20261123m"];
