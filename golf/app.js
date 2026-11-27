@@ -212,7 +212,7 @@
     ORDER.forEach(function (c) { h += tile(c); });
     h += '</div><div class="key"><span><i style="background:var(--quark)"></i>Quarks</span><span><i style="background:var(--lepton)"></i>Leptons</span><span><i style="background:var(--gauge)"></i>Gauge bosons</span><span><i style="background:var(--scalar)"></i>Higgs boson</span><span><i style="background:var(--tensor)"></i>Graviton (hypothetical)</span></div></section>';
     h += '<section class="card">' + infoPanel() + shopPanel() + "</section></div>";
-    h += '<footer>Velvet Golf is made by <a href="' + SITE + '/">AI Study Method</a>. <a href="' + SITE + '/privacy.html">Privacy</a>'
+    h += '<footer>Velvet Golf is made by <a href="' + SITE + '/">Velvet Study</a>. <a href="' + SITE + '/privacy.html">Privacy</a>'
       + '<br>Models and sounds: <a href="https://kenney.nl/" rel="noopener">Kenney</a>, <a href="https://quaternius.com/" rel="noopener">Quaternius</a> and <a href="https://www.kaylousberg.com/" rel="noopener">Kay Lousberg (KayKit)</a>, given to the public domain (CC0). Fonts: Fredoka and Nunito (SIL Open Font License).</footer></div>';
     h += '<div id="stage" hidden><canvas id="canvas" tabindex="0"></canvas><div id="loading"><div id="loadText">Loading Velvet Golf…</div><progress id="loadBar" max="100" value="0"></progress></div></div>';
     root.innerHTML = h;
